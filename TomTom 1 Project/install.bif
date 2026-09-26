@@ -1,0 +1,5 @@
+[TomTomGo]
+RamDiskVersion=20080529
+BootloaderTarget=s3c24xx
+Bootloaderversion=5.4203LinuxVersion=190943
+ApplicationVersion=9369

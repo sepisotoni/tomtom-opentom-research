@@ -1,0 +1,12 @@
+# Node & Vite Web Preview Dashboard artifacts (not part of OpenTom embedded repo)
+node_modules/
+dist/
+package.json
+package-lock.json
+vite.config.ts
+tsconfig.json
+index.html
+src/
+metadata.json
+.dev.env.json
+*.log

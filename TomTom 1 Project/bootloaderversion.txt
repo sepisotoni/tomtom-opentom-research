@@ -1,0 +1,2 @@
+BootloaderTarget=s3c24xx
+Bootloaderversion=5.5001
