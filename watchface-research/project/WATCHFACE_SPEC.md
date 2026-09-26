@@ -97,7 +97,61 @@ draw_weather_overlay(const struct tm *local, int full_redraw)
 
 ---
 
-## 4. Real Data Sources (Zero Mock Data)
+## 4. Layout Modes, 12h/24h Formats & AM/PM Configuration
+
+The watchface supports configurable layout positioning, 12-hour/24-hour formats, and toggleable AM/PM badges:
+
+### On-The-Hour Mode (Expanded Hero Scaling):
+- When `minute == 0` (e.g., 10:00, 12:00, 08:00):
+  - Displays **ONLY the hour numerals** (`10`, `12`, `08`), centered horizontally and vertically on the pitch-black display.
+  - **Hero Scaling**: Hour digits are dramatically **EXPANDED** to hero proportions:
+    - In native C: scaled by `SCALE_HERO` (3×, `78×132 px` per glyph, total pair width `164 px` centered at `x = 78, y = 56`).
+    - In web simulator: rendered at **`144px`** extra-large font-size, centered with high-impact presence.
+  - The colon (`:`) and trailing `00` minutes are omitted.
+  - No redundant labels or text (pure time display).
+  - The top date stamp (`SAT 26 SEP`) and optional AM/PM badge remain cleanly at the top.
+- When `minute != 0` (e.g., 10:01, 08:34):
+  - Displays the full hours, glowing colon dots, and minutes side-by-side (`HH : MM`) or stacked (`HH` over `MM`).
+- **`horizontal` (Default)**: Hours and Minutes side-by-side (`HH : MM`) centered along the 320x240 display:
+  - Digits enlarged to `88px` (in C: `SCALE_NORMAL 2x`, `52×88 px` per glyph).
+  - Hours: `x1 = 38, x2 = 96, y = 76`
+  - Colon dots: centered at `x = 160` (dots at `y = 100` and `y = 134`), maintained at proportional radius to prevent looking unbalanced.
+  - Minutes: `x1 = 172, x2 = 230, y = 76`
+  - Total span: 244 px, perfectly framed by 38 px left and right margins.
+- **`stacked`**: Traditional top-and-bottom (`HH` over `MM`). On the hour, the hour digits expand to the same massive hero proportions.
+
+### Configuration File (`/mnt/sdcard/opentom/etc/watchface.cfg`):
+```ini
+# Layout mode: horizontal (HH : MM) or stacked (HH over MM)
+layout=horizontal
+
+# Time display format: 12 (12-hour AM/PM) or 24 (24-hour military)
+time_format=12
+
+# AM/PM indicator badge: 1 (display), 0 (hide)
+show_ampm=1
+
+# Default initial face (0-4):
+default_face=0
+```
+
+### Command-line Overrides:
+The binary supports runtime flag overrides:
+- `./watchface -horizontal`: Force side-by-side layout (`HH : MM`).
+- `./watchface -stacked`: Force top-and-bottom layout (`HH` over `MM`).
+- `./watchface -12`: Force 12-hour format.
+- `./watchface -24`: Force 24-hour format.
+- `./watchface -ampm`: Enable AM/PM badge.
+- `./watchface -no-ampm`: Hide AM/PM badge.
+
+### AM/PM Rendering Architecture:
+- Positioned in the header bar at top-right (`x = screen_width - 34, y = 12`).
+- Rendered in harmonious color matching the active face's date/accent palette.
+- Updates cleanly at noon (12:00:00 PM) and midnight (12:00:00 AM) without repainting the rest of the display.
+
+---
+
+## 5. Real Data Sources (Zero Mock Data)
 
 The application pulls exclusively from real Linux kernel pseudo-filesystems and system interfaces:
 - **System Uptime**: `/proc/uptime` (parsed via `fscanf` into days, hours, minutes, seconds).
