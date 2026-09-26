@@ -1,6 +1,7 @@
 # Node & Vite Web Preview Dashboard artifacts (not part of OpenTom embedded repo)
 node_modules/
 dist/
+bun.lock
 package.json
 package-lock.json
 vite.config.ts
@@ -10,3 +11,20 @@ src/
 metadata.json
 .dev.env.json
 *.log
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build artifacts & temp files
+*.o
+*.obj
+*.elf
+*.gch
+*.tmp
+*.bak

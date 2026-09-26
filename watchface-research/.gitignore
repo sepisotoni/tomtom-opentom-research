@@ -1,0 +1,16 @@
+# OpenTom watchface-research build & editor exclusions
+*.o
+*.obj
+*.elf
+*.bin
+*.a
+*.so
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tmp
+*.bak
