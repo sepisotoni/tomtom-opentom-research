@@ -29,5 +29,10 @@ repository's `LICENSE` is Apache-2.0. Selected 24px SVGs are stored in
 `assets/material-weather/` with the upstream Apache license. Their upstream
 paths and pinned source revision are recorded in `assets/material-weather/README.md`.
 
-This is an asset inventory only. The preview still has no real weather feed,
-forecast mapping, location permission flow, or verified weather telemetry.
+This is an asset inventory only. The current weather pipeline is separate:
+`project/src/opentom_skel/bin/weather-sync.c` accepts checksum-valid GPS RMC
+fixes and requests a compact summary through the host relay. The renderer
+currently draws its weather glyphs using native Nano-X shapes; it does not
+load these SVG files at runtime. Any new Material-derived icon should preserve
+the Apache-2.0 license and be converted into an embedded-friendly asset with
+the visual workflow documented in `VISUAL_DESIGN_HANDOFF.md`.

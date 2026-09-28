@@ -18,16 +18,19 @@ does not install or select a persistent face.
 - `digit-atlas-roboto.pgm`, `digit-atlas-ubuntu.pgm`, and
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - The three font faces use a centered `HH` over `MM` layout, with an enlarged
-  hour-only view at `:00`. If real weather data becomes available, the time
-  moves into the right half and condition/temperature appear on the left.
-  Date, battery, and seconds remain ordinary details and do not trigger that
-  split. The preview currently has no weather provider, so it stays centered.
+  hour-only view at `:00`. A noteworthy live weather summary moves time to the
+  right and shows condition/temperature in the left panel. Ordinary weather
+  leaves the normal centered layout unchanged.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle through the local styles; Numerals Duo is style 5.
 - `watchface.cfg` starts at Ubuntu and cycles only styles 5–8 (Numerals Duo,
   Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
   to any contiguous range of styles available in the executable. Atlas paths
   are relative to `artwork_dir`.
+
+For new icons and animation design, read
+[`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
+Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
@@ -141,7 +144,8 @@ sentences with an active GPS fix, sends coordinates to the host relay with
 explicit location consent, and stores only the compact display summary in
 device RAM. The relay returns a `no-store` summary; the renderer suppresses
 ordinary conditions and shows noteworthy precipitation, storms, or
-temperature extremes. Weather icons are drawn natively. The
+temperature extremes. The current preview draws weather glyphs with native
+Nano-X shapes; the Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
 references and licensing; selected SVGs and the Apache-2.0 license are kept
 in `assets/material-weather/`.

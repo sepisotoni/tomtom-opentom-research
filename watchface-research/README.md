@@ -44,10 +44,12 @@ or browser-only mockups.
   local source refactor; treat as baseline only, not as the current build.
 - `opentom-license.txt`: project license notice.
 
-The preview uses source files and editable/raster glyph atlases only; generated
+The preview uses source files and editable/raster glyph atlases; generated
 device executables and screenshots are kept out of this source directory.
-Weather remains a later task: the preview currently has no weather provider or
-validated live telemetry path.
+The separate weather companion/relay path now supplies a compact RAM-only
+summary to the preview renderer when a checksum-valid GPS fix is available.
+See `preview/VISUAL_DESIGN_HANDOFF.md` for the icon/animation asset workflow
+and constraints before making visual changes.
 
 ## Findings to keep in mind
 
