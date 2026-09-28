@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timezone
 from io import BytesIO
 from urllib.parse import parse_qs, urlparse
 
@@ -9,6 +10,7 @@ from app import (
     MAX_RESPONSE_BYTES,
     ServiceError,
     WeatherBackend,
+    _timezone_offset_minutes,
 )
 
 AUTHORIZATION = "Be" + "arer service-secret"
@@ -99,8 +101,23 @@ class GoogleWeatherProviderTests(unittest.TestCase):
         self.assertEqual(result["hourly"][0]["temperature"], 20)
         self.assertEqual(result["hourly"][0]["precipitation_probability"], 45)
         self.assertEqual(result["daily"][0]["condition"], "Cloudy")
+        self.assertEqual(
+            result["timezone_offset_minutes"],
+            _timezone_offset_minutes(
+                "Europe/Paris",
+                datetime.fromisoformat(
+                    result["fetched_at_utc"].replace("Z", "+00:00")
+                ),
+            ),
+        )
         self.assertEqual(result["attribution"], GOOGLE_ATTRIBUTION)
         self.assertEqual(result["cache_policy"], "no-store")
+
+    def test_timezone_offset_tracks_daylight_saving(self):
+        winter = datetime(2026, 1, 15, tzinfo=timezone.utc)
+        summer = datetime(2026, 7, 15, tzinfo=timezone.utc)
+        self.assertEqual(_timezone_offset_minutes("Europe/Paris", winter), 60)
+        self.assertEqual(_timezone_offset_minutes("Europe/Paris", summer), 120)
 
 
 class FakeProvider:

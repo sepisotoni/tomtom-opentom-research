@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 
 GOOGLE_WEATHER_BASE = "https://weather.googleapis.com/v1"
@@ -37,6 +38,14 @@ class ServiceError(Exception):
 
 def _utc_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _timezone_offset_minutes(timezone_id, at_utc):
+    local_time = at_utc.astimezone(ZoneInfo(timezone_id))
+    offset = local_time.utcoffset()
+    if offset is None:
+        raise ValueError("Timezone offset is unavailable.")
+    return int(offset.total_seconds() // 60)
 
 
 def _temperature(value):
@@ -191,15 +200,19 @@ class GoogleWeatherProvider:
                     "condition": daytime_condition,
                 })
 
+            fetched_at = datetime.now(timezone.utc)
             time_zone = current.get("timeZone")
             timezone_id = time_zone.get("id") if isinstance(time_zone, dict) else ""
-            if not isinstance(timezone_id, str):
-                timezone_id = ""
+            if not isinstance(timezone_id, str) or not timezone_id:
+                raise ValueError("Missing timezone ID.")
             return {
                 "version": 1,
                 "provider": "google_maps_weather",
-                "fetched_at_utc": _utc_now(),
+                "fetched_at_utc": fetched_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "timezone": timezone_id[:64],
+                "timezone_offset_minutes": _timezone_offset_minutes(
+                    timezone_id, fetched_at
+                ),
                 "current": current_weather,
                 "hourly": hourly_weather,
                 "daily": daily_weather,

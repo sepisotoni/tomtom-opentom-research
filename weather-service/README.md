@@ -58,6 +58,10 @@ condition summaries, and stays within 4 KiB. No coordinates or Google API key
 are returned.
 The rounded coordinates are still sent to Google, so the explicit consent flag
 is required for each request.
+The response also includes the current location's `timezone` IANA ID and
+`timezone_offset_minutes`. The TomTom companion can write that signed offset
+to `/mnt/sdcard/opentom/etc/weather_timezone_offset_minutes`; the watchface
+applies it without requiring a timezone database on the device.
 
 This service intentionally does **not** store or cache Google weather content:
 Google's Weather API policies do not grant an exception to the Maps Platform
