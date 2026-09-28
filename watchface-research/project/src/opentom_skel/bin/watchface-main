@@ -1,0 +1,40 @@
+#!/bin/sh
+
+DIST=/mnt/sdcard/opentom
+GALLERY="$DIST/preview-gallery/modern-20260928"
+
+export LD_LIBRARY_PATH="$DIST/lib"
+if [ -r "$DIST/etc/weather_timezone_offset_minutes" ]; then
+	offset=`cat "$DIST/etc/weather_timezone_offset_minutes" 2>/dev/null`
+	case "$offset" in
+		""|"-"|*[!0-9-]*|-*-*)
+			offset=""
+			;;
+	esac
+	if [ -n "$offset" ]; then
+		case "$offset" in
+			-*)
+				sign="+"
+				minutes=${offset#-}
+				;;
+			*)
+				sign="-"
+				minutes=$offset
+				;;
+		esac
+		if [ "$minutes" -le 840 ]; then
+			hours=`expr "$minutes" / 60`
+			minutes=`expr "$minutes" % 60`
+			if [ "$minutes" -lt 10 ]; then
+				minutes="0$minutes"
+			fi
+			export TZ="TTM$sign$hours:$minutes"
+		fi
+	fi
+fi
+if [ -z "$TZ" ]; then
+	export TZ='CET-1CEST,M3.5.0/2,M10.5.0/3'
+fi
+
+cd "$GALLERY" || exit 1
+exec ./watchface.new

@@ -30,8 +30,10 @@
 #include <time.h>
 #include <math.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include "nano-X.h"
+#include "ttface_loader.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -57,135 +59,136 @@
 #define FACE_SOLID_LAVENDER 2
 #define FACE_VIVID_SUNSET   3
 #define FACE_REAL_TELEMETRY 4
-#define FACE_COUNT          5
+#define FACE_PACKAGED       5
+#define FACE_COUNT          6
 
 /* Precomputed vector bitmasks for digits 0-9 (26x44 grid in 32-bit words) */
 static const unsigned long digit_glyph_solid[10][44] = {
   /* Digit 0 */
-  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL, 
-    0x3fe01ffUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3fe01ffUL, 
-    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL, 
+  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL,
+    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL,
+    0x3fe01ffUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3fe01ffUL,
+    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL,
     0x0fffffcUL, 0x07ffff8UL, 0x01fffe0UL, 0x003ff00UL, },
   /* Digit 1 */
-  { 0x000ffe0UL, 0x001ffe0UL, 0x007ffe0UL, 0x00fffe0UL, 
-    0x01ffffeUL, 0x03ffffeUL, 0x03ffffeUL, 0x07ffffeUL, 
-    0x0fffffeUL, 0x0fffffeUL, 0x0ffeffeUL, 0x0ffcffeUL, 
-    0x0ffcffeUL, 0x0ff8ffeUL, 0x0ff8ffeUL, 0x01c0ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
+  { 0x000ffe0UL, 0x001ffe0UL, 0x007ffe0UL, 0x00fffe0UL,
+    0x01ffffeUL, 0x03ffffeUL, 0x03ffffeUL, 0x07ffffeUL,
+    0x0fffffeUL, 0x0fffffeUL, 0x0ffeffeUL, 0x0ffcffeUL,
+    0x0ffcffeUL, 0x0ff8ffeUL, 0x0ff8ffeUL, 0x01c0ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
     0x0000ffeUL, 0x00007fcUL, 0x00007fcUL, 0x00001f0UL, },
   /* Digit 2 */
-  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL, 
-    0x3fe01ffUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3f8007fUL, 
-    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00001ffUL, 
-    0x00003feUL, 0x00007fcUL, 0x0000ff8UL, 0x0001ff0UL, 
-    0x0003fe0UL, 0x0007fc0UL, 0x000ff80UL, 0x001ff00UL, 
-    0x003fe00UL, 0x007fc00UL, 0x00ff800UL, 0x01ff000UL, 
-    0x03fe000UL, 0x07fc000UL, 0x0ff8000UL, 0x1ff0000UL, 
-    0x3fe0000UL, 0x7fc0000UL, 0xff80000UL, 0x1ff0000UL, 
-    0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 
+  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL,
+    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL,
+    0x3fe01ffUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3f8007fUL,
+    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00001ffUL,
+    0x00003feUL, 0x00007fcUL, 0x0000ff8UL, 0x0001ff0UL,
+    0x0003fe0UL, 0x0007fc0UL, 0x000ff80UL, 0x001ff00UL,
+    0x003fe00UL, 0x007fc00UL, 0x00ff800UL, 0x01ff000UL,
+    0x03fe000UL, 0x07fc000UL, 0x0ff8000UL, 0x1ff0000UL,
+    0x3fe0000UL, 0x7fc0000UL, 0xff80000UL, 0x1ff0000UL,
+    0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL,
     0x3fffffeUL, 0x3fffffeUL, 0x1fffffcUL, 0x0fffffcUL, },
   /* Digit 3 */
-  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL, 
-    0x3fe01ffUL, 0x3fc00ffUL, 0x00000ffUL, 0x000007fUL, 
-    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00001ffUL, 
-    0x00007feUL, 0x0001ffcUL, 0x000fff8UL, 0x001fffeUL, 
-    0x001fffeUL, 0x000fff8UL, 0x0001ffcUL, 0x00007feUL, 
-    0x00001ffUL, 0x00000ffUL, 0x000007fUL, 0x000007fUL, 
-    0x000007fUL, 0x00000ffUL, 0x3fc00ffUL, 0x3fe01ffUL, 
-    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x07ffff8UL, 0x01fffe0UL, 0x003ff00UL, 
+  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL,
+    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL,
+    0x3fe01ffUL, 0x3fc00ffUL, 0x00000ffUL, 0x000007fUL,
+    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00001ffUL,
+    0x00007feUL, 0x0001ffcUL, 0x000fff8UL, 0x001fffeUL,
+    0x001fffeUL, 0x000fff8UL, 0x0001ffcUL, 0x00007feUL,
+    0x00001ffUL, 0x00000ffUL, 0x000007fUL, 0x000007fUL,
+    0x000007fUL, 0x00000ffUL, 0x3fc00ffUL, 0x3fe01ffUL,
+    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL,
+    0x0fffffcUL, 0x07ffff8UL, 0x01fffe0UL, 0x003ff00UL,
     0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL, },
   /* Digit 4 */
-  { 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3ffffffUL, 0x3ffffffUL, 
-    0x3ffffffUL, 0x3ffffffUL, 0x3ffffffUL, 0x3ffffffUL, 
-    0x3ffffffUL, 0x3ffffffUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
+  { 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL,
+    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL,
+    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL,
+    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL,
+    0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL, 0x3f80ffeUL,
+    0x3f80ffeUL, 0x3f80ffeUL, 0x3ffffffUL, 0x3ffffffUL,
+    0x3ffffffUL, 0x3ffffffUL, 0x3ffffffUL, 0x3ffffffUL,
+    0x3ffffffUL, 0x3ffffffUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
     0x0000ffeUL, 0x00007fcUL, 0x00007fcUL, 0x00001f0UL, },
   /* Digit 5 */
-  { 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 
-    0x3fffffeUL, 0x3fffffeUL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3f80000UL, 0x3ffff80UL, 0x3ffffc0UL, 
-    0x3ffffe0UL, 0x3fffff0UL, 0x3f807f8UL, 0x00001fcUL, 
-    0x00000feUL, 0x00000ffUL, 0x000007fUL, 0x000007fUL, 
-    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00000feUL, 
-    0x3fc01fcUL, 0x3fe03f8UL, 0x1fffff0UL, 0x1ffffe0UL, 
-    0x0ffffc0UL, 0x07fff80UL, 0x01ffe00UL, 0x007f800UL, 
+  { 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL,
+    0x3fffffeUL, 0x3fffffeUL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3f80000UL, 0x3ffff80UL, 0x3ffffc0UL,
+    0x3ffffe0UL, 0x3fffff0UL, 0x3f807f8UL, 0x00001fcUL,
+    0x00000feUL, 0x00000ffUL, 0x000007fUL, 0x000007fUL,
+    0x000007fUL, 0x000007fUL, 0x00000ffUL, 0x00000feUL,
+    0x3fc01fcUL, 0x3fe03f8UL, 0x1fffff0UL, 0x1ffffe0UL,
+    0x0ffffc0UL, 0x07fff80UL, 0x01ffe00UL, 0x007f800UL,
     0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL, },
   /* Digit 6 */
-  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff8000UL, 
-    0x3fe0000UL, 0x3fc0000UL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 
-    0x3f80000UL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 
-    0x3fe01ffUL, 0x3fc00ffUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3fe01ffUL, 
-    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL, 
+  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL,
+    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff8000UL,
+    0x3fe0000UL, 0x3fc0000UL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3f80000UL, 0x3f80000UL, 0x3f80000UL,
+    0x3f80000UL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL,
+    0x3fe01ffUL, 0x3fc00ffUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3fc00ffUL, 0x3fc00ffUL, 0x3fe01ffUL,
+    0x1ff87feUL, 0x1fffffeUL, 0x1fffffeUL, 0x0fffffcUL,
     0x0fffffcUL, 0x07ffff8UL, 0x01fffe0UL, 0x003ff00UL, },
   /* Digit 7 */
-  { 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 
-    0x3fffffeUL, 0x3fffffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0001ffcUL, 0x0001ffcUL, 0x0003ff8UL, 0x0003ff8UL, 
-    0x0007ff0UL, 0x0007ff0UL, 0x000ffe0UL, 0x000ffe0UL, 
-    0x001ffc0UL, 0x001ffc0UL, 0x003ff80UL, 0x003ff80UL, 
-    0x007ff00UL, 0x007ff00UL, 0x00ffe00UL, 0x00ffe00UL, 
-    0x01ffc00UL, 0x01ffc00UL, 0x03ff800UL, 0x03ff800UL, 
-    0x07ff000UL, 0x07ff000UL, 0x0ffe000UL, 0x0ffe000UL, 
-    0x1ffc000UL, 0x1ffc000UL, 0x3ff8000UL, 0x3ff8000UL, 
-    0x7ff0000UL, 0x7ff0000UL, 0xffe0000UL, 0xffe0000UL, 
+  { 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL,
+    0x3fffffeUL, 0x3fffffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0001ffcUL, 0x0001ffcUL, 0x0003ff8UL, 0x0003ff8UL,
+    0x0007ff0UL, 0x0007ff0UL, 0x000ffe0UL, 0x000ffe0UL,
+    0x001ffc0UL, 0x001ffc0UL, 0x003ff80UL, 0x003ff80UL,
+    0x007ff00UL, 0x007ff00UL, 0x00ffe00UL, 0x00ffe00UL,
+    0x01ffc00UL, 0x01ffc00UL, 0x03ff800UL, 0x03ff800UL,
+    0x07ff000UL, 0x07ff000UL, 0x0ffe000UL, 0x0ffe000UL,
+    0x1ffc000UL, 0x1ffc000UL, 0x3ff8000UL, 0x3ff8000UL,
+    0x7ff0000UL, 0x7ff0000UL, 0xffe0000UL, 0xffe0000UL,
     0x1ffc000UL, 0x0ffc000UL, 0x07fc000UL, 0x01f8000UL, },
   /* Digit 8 */
-  { 0x003fe00UL, 0x01fff80UL, 0x07fffe0UL, 0x0ffffffUL, 
-    0x0ffffffUL, 0x1ffffffUL, 0x1f801ffUL, 0x1f801ffUL, 
-    0x3f000ffUL, 0x3f000ffUL, 0x3f000ffUL, 0x3f000ffUL, 
-    0x3f000ffUL, 0x3f000ffUL, 0x1f801ffUL, 0x1f801ffUL, 
-    0x1ffffffUL, 0x0ffffffUL, 0x07fffe0UL, 0x07ffff8UL, 
-    0x0ffffffUL, 0x1ffffffUL, 0x1ffffffUL, 0x1f800ffUL, 
-    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 
-    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 
-    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x1f800ffUL, 
-    0x1ffffffUL, 0x1ffffffUL, 0x0ffffffUL, 0x0ffffffUL, 
+  { 0x003fe00UL, 0x01fff80UL, 0x07fffe0UL, 0x0ffffffUL,
+    0x0ffffffUL, 0x1ffffffUL, 0x1f801ffUL, 0x1f801ffUL,
+    0x3f000ffUL, 0x3f000ffUL, 0x3f000ffUL, 0x3f000ffUL,
+    0x3f000ffUL, 0x3f000ffUL, 0x1f801ffUL, 0x1f801ffUL,
+    0x1ffffffUL, 0x0ffffffUL, 0x07fffe0UL, 0x07ffff8UL,
+    0x0ffffffUL, 0x1ffffffUL, 0x1ffffffUL, 0x1f800ffUL,
+    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL,
+    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL,
+    0x3f0007fUL, 0x3f0007fUL, 0x3f0007fUL, 0x1f800ffUL,
+    0x1ffffffUL, 0x1ffffffUL, 0x0ffffffUL, 0x0ffffffUL,
     0x07ffff8UL, 0x01fffe0UL, 0x007ff00UL, 0x0000000UL, },
   /* Digit 9 */
-  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL, 
-    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL, 
-    0x3fe01ffUL, 0x3fc00ffUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 
-    0x3f8007fUL, 0x3fc00ffUL, 0x3fe01ffUL, 0x1ff87feUL, 
-    0x1fffffeUL, 0x1fffffeUL, 0x0fffffeUL, 0x07ffffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 
-    0x3f80ffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL, 
+  { 0x003ff00UL, 0x01fffe0UL, 0x07ffff8UL, 0x0fffffcUL,
+    0x0fffffcUL, 0x1fffffeUL, 0x1fffffeUL, 0x1ff87feUL,
+    0x3fe01ffUL, 0x3fc00ffUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL, 0x3f8007fUL,
+    0x3f8007fUL, 0x3fc00ffUL, 0x3fe01ffUL, 0x1ff87feUL,
+    0x1fffffeUL, 0x1fffffeUL, 0x0fffffeUL, 0x07ffffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL, 0x0000ffeUL,
+    0x3f80ffeUL, 0x3fffffeUL, 0x3fffffeUL, 0x3fffffeUL,
     0x1fffffeUL, 0x07ffffcUL, 0x01fffe0UL, 0x003ff00UL, },
 };
 
 static const unsigned long digit_glyph_outline[10][44] = {
   /* Digit 0 (Outline) */
-    0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
+  { 0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
     0x0c0000cUL, 0x1807806UL, 0x181fe06UL, 0x1838706UL,
     0x3060183UL, 0x30c00c3UL, 0x30c00c3UL, 0x3180063UL,
     0x3180063UL, 0x3180063UL, 0x3180063UL, 0x3180063UL,
@@ -195,9 +198,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x3180063UL, 0x3180063UL, 0x3180063UL, 0x3180063UL,
     0x3180063UL, 0x30c00c3UL, 0x30c00c3UL, 0x3060183UL,
     0x1838706UL, 0x181fe06UL, 0x1807806UL, 0x0c0000cUL,
-    0x0e0001cUL, 0x07c00f8UL, 0x01fffe0UL, 0x003ff00UL,,
+    0x0e0001cUL, 0x07c00f8UL, 0x01fffe0UL, 0x003ff00UL },
   /* Digit 1 (Outline) */
-    0x000ffe0UL, 0x001ffe0UL, 0x0070060UL, 0x00e0060UL,
+    { 0x000ffe0UL, 0x001ffe0UL, 0x0070060UL, 0x00e0060UL,
     0x018003eUL, 0x030001eUL, 0x0300006UL, 0x0600006UL,
     0x0c00006UL, 0x0c00006UL, 0x0c00006UL, 0x0c00006UL,
     0x0c00006UL, 0x0e00006UL, 0x0fc0006UL, 0x01c0c06UL,
@@ -207,9 +210,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
-    0x0000c06UL, 0x000060cUL, 0x00007fcUL, 0x00001f0UL,,
+    0x0000c06UL, 0x000060cUL, 0x00007fcUL, 0x00001f0UL },
   /* Digit 2 (Outline) */
-    0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
+    { 0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
     0x0c0000cUL, 0x1807806UL, 0x181fe06UL, 0x1838706UL,
     0x3060183UL, 0x30c00c3UL, 0x3fc00c3UL, 0x3f80063UL,
     0x0000063UL, 0x0000063UL, 0x00000c3UL, 0x0000183UL,
@@ -219,9 +222,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0306000UL, 0x060c000UL, 0x0c18000UL, 0x1830000UL,
     0x3060000UL, 0x30c0000UL, 0x3180000UL, 0x18f0000UL,
     0x307fffeUL, 0x300fffeUL, 0x3000006UL, 0x3000006UL,
-    0x3000006UL, 0x3000006UL, 0x1fffffcUL, 0x0fffffcUL,,
+    0x3000006UL, 0x3000006UL, 0x1fffffcUL, 0x0fffffcUL },
   /* Digit 3 (Outline) */
-    0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
+    { 0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
     0x0c0000cUL, 0x1807806UL, 0x181fe06UL, 0x1838706UL,
     0x3fe0183UL, 0x3fc00c3UL, 0x00000c3UL, 0x0000063UL,
     0x0000063UL, 0x0000063UL, 0x00000c3UL, 0x0000183UL,
@@ -231,9 +234,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0000063UL, 0x00000c3UL, 0x3fc00c3UL, 0x3fe0183UL,
     0x1838706UL, 0x181fe06UL, 0x1807806UL, 0x0c0000cUL,
     0x0e0001cUL, 0x07c00f8UL, 0x01fffe0UL, 0x003ff00UL,
-    0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL,,
+    0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL },
   /* Digit 4 (Outline) */
-    0x3f80ffeUL, 0x3f80ffeUL, 0x3180c06UL, 0x3180c06UL,
+    { 0x3f80ffeUL, 0x3f80ffeUL, 0x3180c06UL, 0x3180c06UL,
     0x3180c06UL, 0x3180c06UL, 0x3180c06UL, 0x3180c06UL,
     0x3180c06UL, 0x3180c06UL, 0x3180c06UL, 0x3180c06UL,
     0x3180c06UL, 0x3180c06UL, 0x3180c06UL, 0x3180c06UL,
@@ -243,9 +246,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x3fff003UL, 0x3fff803UL, 0x0000c06UL, 0x0000c06UL,
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
-    0x0000c06UL, 0x000060cUL, 0x00007fcUL, 0x00001f0UL,,
+    0x0000c06UL, 0x000060cUL, 0x00007fcUL, 0x00001f0UL },
   /* Digit 5 (Outline) */
-    0x3fffffeUL, 0x3fffffeUL, 0x3000006UL, 0x3000006UL,
+    { 0x3fffffeUL, 0x3fffffeUL, 0x3000006UL, 0x3000006UL,
     0x307fffeUL, 0x30ffffeUL, 0x3180000UL, 0x3180000UL,
     0x3180000UL, 0x3180000UL, 0x3180000UL, 0x3180000UL,
     0x3180000UL, 0x3180000UL, 0x3180000UL, 0x3180000UL,
@@ -255,9 +258,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0000063UL, 0x0000063UL, 0x00000c3UL, 0x00000c6UL,
     0x3fc018cUL, 0x3fe0318UL, 0x183fe30UL, 0x181fc60UL,
     0x0e001c0UL, 0x0780780UL, 0x01ffe00UL, 0x007f800UL,
-    0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL,,
+    0x0000000UL, 0x0000000UL, 0x0000000UL, 0x0000000UL },
   /* Digit 6 (Outline) */
-    0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
+    { 0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
     0x0c0000cUL, 0x1807ffeUL, 0x181fffeUL, 0x1838000UL,
     0x3060000UL, 0x30c0000UL, 0x3180000UL, 0x3180000UL,
     0x3180000UL, 0x3180000UL, 0x3180000UL, 0x3180000UL,
@@ -267,9 +270,9 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x3180063UL, 0x3180063UL, 0x3180063UL, 0x3180063UL,
     0x3180063UL, 0x30c00c3UL, 0x30c00c3UL, 0x3060183UL,
     0x1838706UL, 0x181fe06UL, 0x1807806UL, 0x0c0000cUL,
-    0x0e0001cUL, 0x07c00f8UL, 0x01fffe0UL, 0x003ff00UL,,
+    0x0e0001cUL, 0x07c00f8UL, 0x01fffe0UL, 0x003ff00UL },
   /* Digit 7 (Outline) */
-    0x3fffffeUL, 0x3fffffeUL, 0x3000006UL, 0x3000006UL,
+    { 0x3fffffeUL, 0x3fffffeUL, 0x3000006UL, 0x3000006UL,
     0x3fff006UL, 0x3fff806UL, 0x0000c06UL, 0x0000c06UL,
     0x000180cUL, 0x000180cUL, 0x0003018UL, 0x0003018UL,
     0x0006030UL, 0x0006030UL, 0x000c060UL, 0x000c060UL,
@@ -279,21 +282,21 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0603000UL, 0x0603000UL, 0x0c06000UL, 0x0c06000UL,
     0x180c000UL, 0x180c000UL, 0x3018000UL, 0x3018000UL,
     0x3030000UL, 0x3030000UL, 0x3060000UL, 0x3060000UL,
-    0x183c000UL, 0x0e1c000UL, 0x07fc000UL, 0x01f8000UL,,
+    0x183c000UL, 0x0e1c000UL, 0x07fc000UL, 0x01f8000UL },
   /* Digit 8 (Outline) */
-    0x003fe00UL, 0x01fff80UL, 0x07c01e0UL, 0x0e0007fUL,
+    { 0x003fe00UL, 0x01fff80UL, 0x07c01e0UL, 0x0e0007fUL,
     0x0c7fe1fUL, 0x18fff03UL, 0x1980183UL, 0x1980183UL,
     0x33000c3UL, 0x33000c3UL, 0x33000c3UL, 0x33000c3UL,
     0x33000c3UL, 0x33000c3UL, 0x1980183UL, 0x1980183UL,
     0x18fff1fUL, 0x0c7fe3fUL, 0x0600060UL, 0x0600038UL,
-    0x0c0001fUL, 0x187ff07UL, 0x18fff83UL, 0x19800c3UL,
+    0x0c00001fUL, 0x187ff07UL, 0x18fff83UL, 0x19800c3UL,
     0x3300063UL, 0x3300063UL, 0x3300063UL, 0x3300063UL,
     0x3300063UL, 0x3300063UL, 0x3300063UL, 0x3300063UL,
     0x3300063UL, 0x3300063UL, 0x3300063UL, 0x19800c3UL,
     0x18fff83UL, 0x187ff03UL, 0x0c00007UL, 0x0e0001fUL,
-    0x07800f8UL, 0x01fffe0UL, 0x007ff00UL, 0x0000000UL,,
+    0x07800f8UL, 0x01fffe0UL, 0x007ff00UL, 0x0000000UL },
   /* Digit 9 (Outline) */
-    0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
+    { 0x003ff00UL, 0x01fffe0UL, 0x07c00f8UL, 0x0e0001cUL,
     0x0c0000cUL, 0x1807806UL, 0x181fe06UL, 0x1838706UL,
     0x3060183UL, 0x30c00c3UL, 0x3180063UL, 0x3180063UL,
     0x3180063UL, 0x3180063UL, 0x3180063UL, 0x3180063UL,
@@ -303,7 +306,7 @@ static const unsigned long digit_glyph_outline[10][44] = {
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
     0x0000c06UL, 0x0000c06UL, 0x0000c06UL, 0x0000c06UL,
     0x3f80c06UL, 0x3fff806UL, 0x307f006UL, 0x3800006UL,
-    0x1e0001eUL, 0x07c00fcUL, 0x01fffe0UL, 0x003ff00UL,
+    0x1e0001eUL, 0x07c00fcUL, 0x01fffe0UL, 0x003ff00UL }
 };
 
 /* Forward declaration of plug-in overlay callback */
@@ -325,6 +328,9 @@ typedef struct {
 static int cfg_layout = LAYOUT_HORIZONTAL; /* 0 = side-by-side HH:MM; 1 = stacked */
 static int cfg_12hour = 1;                 /* 1 = 12-hour AM/PM; 0 = 24-hour military */
 static int cfg_show_ampm = 1;              /* 1 = show AM/PM indicator; 0 = hide */
+static int applied_timezone_offset_minutes;
+static int has_applied_timezone_offset;
+static time_t timezone_check_time;
 
 /* Nano-X State */
 static GR_WINDOW_ID window;
@@ -332,6 +338,7 @@ static GR_GC_ID gc;
 static GR_FONT_ID detail_font;
 static volatile sig_atomic_t face_change_requested;
 static int current_face_idx = FACE_FROST_OUTLINE;
+static int packaged_native_face_idx = -1;
 
 static GR_SIZE screen_width = SCREEN_W;
 static GR_SIZE screen_height = SCREEN_H;
@@ -348,6 +355,51 @@ request_next_face(int signal_number)
 {
 	(void)signal_number;
 	face_change_requested = 1;
+}
+
+static int
+apply_weather_timezone(void)
+{
+	FILE *fp;
+	char line[32];
+	char *end;
+	long offset_minutes;
+	long absolute_minutes;
+	char tz_value[32];
+	time_t now;
+
+	now = time(NULL);
+	if (timezone_check_time != 0 && now == timezone_check_time)
+		return 0;
+	timezone_check_time = now;
+	fp = fopen("/mnt/sdcard/opentom/etc/weather_timezone_offset_minutes", "r");
+	if (!fp)
+		return 0;
+	if (!fgets(line, sizeof(line), fp)) {
+		fclose(fp);
+		return 0;
+	}
+	fclose(fp);
+
+	offset_minutes = strtol(line, &end, 10);
+	while (*end != '\0' && isspace((unsigned char)*end))
+		++end;
+	if (*end != '\0' || offset_minutes < -840 || offset_minutes > 840)
+		return 0;
+	if (has_applied_timezone_offset &&
+	    offset_minutes == applied_timezone_offset_minutes)
+		return 0;
+
+	absolute_minutes = offset_minutes < 0 ? -offset_minutes : offset_minutes;
+	snprintf(tz_value, sizeof(tz_value), "TTM%c%02ld:%02ld",
+		 offset_minutes >= 0 ? '-' : '+',
+		 absolute_minutes / 60, absolute_minutes % 60);
+	if (setenv("TZ", tz_value, 1) != 0)
+		return 0;
+	tzset();
+	applied_timezone_offset_minutes = (int)offset_minutes;
+	has_applied_timezone_offset = 1;
+	return 1;
 }
 
 /* Load optional configuration file from disk */
@@ -562,7 +614,7 @@ draw_telemetry_overlay(const struct tm *local, int full_redraw)
 	now_val = time(NULL);
 	utc_tm = gmtime(&now_val);
 	if (cfg_12hour) {
-		snprintf(time_str, sizeof(time_str), "PARIS TIME: %02d:%02d:%02d %s (%Z)",
+		snprintf(time_str, sizeof(time_str), "PARIS TIME: %02d:%02d:%02d %s",
 			display_h, local->tm_min, local->tm_sec, is_pm ? "PM" : "AM");
 	} else {
 		strftime(time_str, sizeof(time_str), "PARIS TIME: %H:%M:%S (%Z)", local);
@@ -583,6 +635,125 @@ draw_telemetry_overlay(const struct tm *local, int full_redraw)
 	draw_centered_text(load_str, 142, GR_RGB(255, 200, 90));
 	draw_centered_text(mem_str, 164, GR_RGB(140, 215, 255));
 	draw_centered_text("TAP SCREEN TO CYCLE WATCH FACES", 216, GR_RGB(110, 130, 160));
+}
+
+static unsigned short static_bg_pixels[TTFACE_RAW_BG_PIXELS];
+
+static void
+load_packaged_native_face(void)
+{
+	FILE *fp;
+	char json_buf[4096];
+	size_t nread;
+	TTFaceManifest manifest;
+
+	fp = fopen("/mnt/sdcard/opentom/faces/active/manifest.json", "r");
+	if (!fp)
+		return;
+	nread = fread(json_buf, 1, sizeof(json_buf) - 1, fp);
+	if (nread == sizeof(json_buf) - 1 && !feof(fp)) {
+		fprintf(stderr, "Active face manifest exceeds the 4095-byte limit\n");
+		fclose(fp);
+		return;
+	}
+	json_buf[nread] = '\0';
+	fclose(fp);
+
+	if (!ttface_parse_manifest_json(json_buf, &manifest))
+		return;
+	packaged_native_face_idx =
+		ttface_legacy_renderer_face_index(manifest.renderer_id);
+	if (packaged_native_face_idx == -2) {
+		fprintf(stderr, "Unsupported packaged renderer: %s\n",
+			manifest.renderer_id);
+		packaged_native_face_idx = -1;
+	}
+}
+
+/* Packaged Face (.ttface) Overlay Renderer */
+static void
+draw_packaged_face_overlay(const struct tm *local, int full_redraw)
+{
+	TTFaceManifest manifest;
+	TTDeviceState state;
+	FILE *fp;
+	char json_buf[4096];
+	size_t nread;
+	int i;
+	int loaded_manifest = 0;
+
+	/* Populate device telemetry state */
+	memset(&state, 0, sizeof(state));
+	state.battery_percent = 80;
+	state.gps_status = 1;
+	state.weather_status = 0;
+
+	/* Attempt to read manifest.json from active packaged face directory */
+	fp = fopen("/mnt/sdcard/opentom/faces/active/manifest.json", "r");
+	if (!fp)
+		fp = fopen("/tmp/active_face/manifest.json", "r");
+	if (!fp)
+		fp = fopen("manifest.json", "r");
+
+	if (fp != NULL) {
+		nread = fread(json_buf, 1, sizeof(json_buf) - 1, fp);
+		json_buf[nread] = '\0';
+		fclose(fp);
+		loaded_manifest = ttface_parse_manifest_json(json_buf, &manifest);
+	}
+
+	if (!loaded_manifest) {
+		if (full_redraw) {
+			GrSetGCForeground(gc, GR_RGB(10, 10, 20));
+			GrFillRect(window, gc, 0, 0, screen_width, screen_height);
+			draw_centered_text("NO PACKAGED FACE ACTIVE", 90, GR_RGB(160, 185, 215));
+			draw_centered_text("EXPORT .TTFACE FROM STUDIO", 114, GR_RGB(96, 165, 250));
+			draw_centered_text("UNPACK TO /mnt/sdcard/opentom/faces/active/", 138, GR_RGB(100, 160, 200));
+		}
+		return;
+	}
+
+	/* On full redraw, load and blit RGB565 background */
+	if (full_redraw) {
+		if (ttface_load_rgb565_file("/mnt/sdcard/opentom/faces/active/assets/bg.rgb565", static_bg_pixels, TTFACE_RAW_BG_PIXELS) ||
+		    ttface_load_rgb565_file("/tmp/active_face/assets/bg.rgb565", static_bg_pixels, TTFACE_RAW_BG_PIXELS) ||
+		    ttface_load_rgb565_file("assets/bg.rgb565", static_bg_pixels, TTFACE_RAW_BG_PIXELS)) {
+			ttface_blit_rgb565(window, gc, static_bg_pixels);
+		} else {
+			GrSetGCForeground(gc, manifest.background_fallback);
+			GrFillRect(window, gc, 0, 0, screen_width, screen_height);
+		}
+	}
+
+	/* Render elements bounded by rules */
+	for (i = 0; i < manifest.element_count; ++i) {
+		TTFaceElement *el = &manifest.elements[i];
+
+		/* Check if rule permits rendering. Unknown/invalid rules return 0 (fail closed!) */
+		if (!ttface_is_element_visible(el, &state))
+			continue;
+
+		GrSetGCForeground(gc, el->color);
+
+		if (el->type == TTFACE_EL_DIGITAL_TIME) {
+			char time_str[32];
+			int h = cfg_12hour ? (local->tm_hour % 12 ? local->tm_hour % 12 : 12) : local->tm_hour;
+			snprintf(time_str, sizeof(time_str), "%02d:%02d", h, local->tm_min);
+			GrSetGCFont(gc, detail_font);
+			GrText(window, gc, el->x, el->y, (void *)time_str, (int)strlen(time_str), GR_TFBASELINE);
+		} else if (el->type == TTFACE_EL_DATE) {
+			char date_str[32];
+			strftime(date_str, sizeof(date_str), "%a %d %b", local);
+			GrSetGCFont(gc, detail_font);
+			GrText(window, gc, el->x, el->y, (void *)date_str, (int)strlen(date_str), GR_TFBASELINE);
+		} else if (el->type == TTFACE_EL_TEXT) {
+			const char *str = (el->text_label[0] != '\0') ? el->text_label : "LABEL";
+			GrSetGCFont(gc, detail_font);
+			GrText(window, gc, el->x, el->y, (void *)str, (int)strlen(str), GR_TFBASELINE);
+		} else if (el->type == TTFACE_EL_STATUS_ICON) {
+			GrFillRect(window, gc, el->x, el->y, el->width > 0 ? el->width : 16, el->height > 0 ? el->height : 16);
+		}
+	}
 }
 
 /* Master modular Watch Face array (Expandable table) */
@@ -641,14 +812,34 @@ static const WatchFace watch_faces[FACE_COUNT] = {
 		0,
 		0,
 		draw_telemetry_overlay   /* Calls real live telemetry renderer */
+	},
+	/* Face 5: Packaged Face (.ttface) */
+	{
+		"Packaged Face",
+		GR_RGB(0, 0, 0),         /* Pitch black background */
+		GR_RGB(130, 235, 255),
+		GR_RGB(130, 235, 255),
+		GR_RGB(100, 160, 200),
+		0,
+		0,
+		draw_packaged_face_overlay /* Calls packaged face renderer */
 	}
 };
+
+static int
+active_renderer_face_index(void)
+{
+	if (current_face_idx == FACE_PACKAGED &&
+	    packaged_native_face_idx >= 0)
+		return packaged_native_face_idx;
+	return current_face_idx;
+}
 
 /* Renders side-by-side horizontal layout with enlarged digits and giant on-the-hour size */
 static void
 render_horizontal_face(const struct tm *local, int full_redraw)
 {
-	const WatchFace *face = &watch_faces[current_face_idx];
+	const WatchFace *face = &watch_faces[active_renderer_face_index()];
 	int raw_hour = local->tm_hour;
 	int is_pm = (raw_hour >= 12);
 	int display_hour;
@@ -759,7 +950,7 @@ render_horizontal_face(const struct tm *local, int full_redraw)
 static void
 render_stacked_face(const struct tm *local, int full_redraw)
 {
-	const WatchFace *face = &watch_faces[current_face_idx];
+	const WatchFace *face = &watch_faces[active_renderer_face_index()];
 	int raw_hour = local->tm_hour;
 	int is_pm = (raw_hour >= 12);
 	int display_hour;
@@ -856,7 +1047,7 @@ render_stacked_face(const struct tm *local, int full_redraw)
 static void
 render_face(const struct tm *local, int full_redraw)
 {
-	const WatchFace *face = &watch_faces[current_face_idx];
+	const WatchFace *face = &watch_faces[active_renderer_face_index()];
 
 	if (face->custom_overlay != NULL) {
 		face->custom_overlay(local, full_redraw);
@@ -882,6 +1073,7 @@ main(int argc, char *argv[])
 
 	/* Load default file configuration */
 	load_configuration();
+	load_packaged_native_face();
 
 	/* Parse optional command line flags */
 	for (i = 1; i < argc; i++) {
@@ -943,7 +1135,8 @@ main(int argc, char *argv[])
 		time_t now_time;
 		struct tm *local_tm;
 		int force_full = 0;
-		int is_wave = watch_faces[current_face_idx].has_hydro_wave;
+		int is_wave =
+			watch_faces[active_renderer_face_index()].has_hydro_wave;
 
 		GrGetNextEventTimeout(&event, is_wave ? 50L : 1000L);
 
@@ -973,6 +1166,9 @@ main(int argc, char *argv[])
 			current_face_idx = (current_face_idx + 1) % FACE_COUNT;
 			force_full = 1;
 		}
+
+		if (apply_weather_timezone())
+			force_full = 1;
 
 		if (event.type == GR_EVENT_TYPE_EXPOSURE && !force_full)
 			continue;

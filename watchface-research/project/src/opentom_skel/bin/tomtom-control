@@ -1,0 +1,12 @@
+#!/bin/sh
+
+DIST=/mnt/sdcard/opentom
+CONTROL="$DIST/bin/tt-control"
+
+if [ ! -x "$CONTROL" ]; then
+	echo "TomTom control server is not installed: $CONTROL" >&2
+	exit 1
+fi
+
+export LD_LIBRARY_PATH="$DIST/lib"
+exec "$CONTROL"

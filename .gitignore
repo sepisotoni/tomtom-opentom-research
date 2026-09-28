@@ -28,3 +28,7 @@ Thumbs.db
 *.gch
 *.tmp
 *.bak
+.build_venv/
+build/
+__pycache__/
+*.pyc

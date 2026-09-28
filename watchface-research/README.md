@@ -23,6 +23,11 @@ or browser-only mockups.
 ## Contents
 
 - `project/applications/src/tools/watchface.c`: current watch application.
+- `preview/`: isolated Nano-X face preview and rounded Numerals Duo artwork;
+  not the packaged-face runtime or the persistent startup face.
+- `project/applications/src/tools/ttface_loader.h` and
+  `ttface_package.c`: opt-in package parsing/rendering and bounded ZIP
+  extraction under development. Extraction is not yet wired into startup.
 - `project/applications/src/tools/Makefile`: app-specific build rules.
 - `project/src/opentom_skel/start.sh`: persistent startup template.
 - `project/src/opentom_skel/etc/nxmenu.cfg`: persistent menu template.
@@ -38,6 +43,11 @@ or browser-only mockups.
 - `baseline/watchface-current-arm`: ARM executable staged before the latest
   local source refactor; treat as baseline only, not as the current build.
 - `opentom-license.txt`: project license notice.
+
+The preview uses source files and editable/raster glyph atlases only; generated
+device executables and screenshots are kept out of this source directory.
+Weather remains a later task: the preview currently has no weather provider or
+validated live telemetry path.
 
 ## Findings to keep in mind
 

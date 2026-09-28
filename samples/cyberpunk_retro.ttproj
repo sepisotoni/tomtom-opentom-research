@@ -1,0 +1,96 @@
+{
+  "file_format": "ttproj",
+  "version": 1,
+  "project": {
+    "metadata": {
+      "name": "Cyberpunk Retro",
+      "version": "1.0.0",
+      "author": "TomTom Face Studio"
+    },
+    "background_color": "#0A0A1A",
+    "canvas": {
+      "width": 320,
+      "height": 240
+    },
+    "elements": [
+      {
+        "id": "main_clock",
+        "type": "digital_time",
+        "format": "HH:MM",
+        "x": 65,
+        "y": 25,
+        "width": 190,
+        "height": 55,
+        "color": "#84EBFF",
+        "font_size": 48,
+        "is_12h": false,
+        "rule": null
+      },
+      {
+        "id": "date_line",
+        "type": "date",
+        "x": 95,
+        "y": 78,
+        "width": 130,
+        "height": 22,
+        "color": "#FF7341",
+        "font_size": 18,
+        "rule": null
+      },
+      {
+        "id": "bat_warning",
+        "type": "status_icon",
+        "icon_type": "battery_low",
+        "x": 285,
+        "y": 10,
+        "width": 24,
+        "height": 24,
+        "color": "#FF4444",
+        "rule": "battery_low"
+      },
+      {
+        "id": "gps_indicator",
+        "type": "status_icon",
+        "icon_type": "gps_fix",
+        "x": 10,
+        "y": 10,
+        "width": 24,
+        "height": 24,
+        "color": "#00FFCC",
+        "rule": "gps_fix"
+      },
+      {
+        "id": "weather_alert",
+        "type": "status_icon",
+        "icon_type": "weather_unavailable",
+        "x": 40,
+        "y": 10,
+        "width": 24,
+        "height": 24,
+        "color": "#FFAA00",
+        "rule": "weather_unavailable"
+      }
+    ],
+    "rules": [
+      {
+        "name": "battery_low",
+        "signal": "battery_percent",
+        "op": "<=",
+        "value": 20
+      },
+      {
+        "name": "gps_fix",
+        "signal": "gps_status",
+        "op": "==",
+        "value": 1
+      },
+      {
+        "name": "weather_unavailable",
+        "signal": "weather_status",
+        "op": "==",
+        "value": 0
+      }
+    ]
+  },
+  "canvas_png_b64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAADwCAIAAAD+Tyo8AAAJTUlEQVR4nO3dPZIkRxkG4FxClvYGKEKY4GNwD90CHwtDhiLAks8t9hxgcABMFLGe3LXBaEXT9G/9ZFZ9b/XzGBuzPVnf5HbXO19Wds3sh6+//nUDMv1q7wkAywkwBBNgCCbAEEyAIZgAQzABhmACDMEEGIIJMAQTYAgmwBBMgCGYAEOwdw/wly+f//zvz3vPgm7e7QX94OeBIde7d2CIJsAQTIAh2LwAv9sOARRnEwuCWUJDMAGGYAIMwQT44Ow7HptNLAimA0MwAYZgAgzBBBiCCTAEE2AIJsAQTIAhmABDMAGGYAIMwQQYggkwBBPgjfixPkbw44QQTAeGYAIMwQQYggkwDDduC9MmFgTTgSGYAEMwAYZgVQLsRiVYwCYWBKvSgYEFBBiCCTAEE2AIJsAQTIAhmABDMAGGYALMEG6t24Y7sSCYDgzBBBiCCTAEE2AIJsAQTIAhmABDMAGGYAIMwQQYggkwBBNgCCbAEEyAIZgAQzABhmACDMEEGIIJMAQTYAgmwBBMgCGYAEMwAYZgAgzBBBiCCTAEE2AINjDA/n86GM3/TgjBLKEhmABDMAGGYAJMObY/p7OJBcF0YAgmwBBMgCHYV3tPgLW+fPn8l5/bX3/zzS9//eNvn4//+Ld/jZ8UG7GJdQQvQ/uIMKcT4GyLo3tJjHMJcKQuub0lyXFsYuUZlN6hlRlEB06yWcC04hQ6cIwt26NWnEKAM2yfKBmOIMAB9sqSDNcnwNXtmyIZLu6AAT7SD6NVyE+FOfCIXei6SiXHvnRNB+zAx1Aqva3efDgR4IpqpqXmrN6cAEMwAS6ncqOrPLf3JMC11E9I/Rm+FQGGYAIMwQS4kJTVaco834EAQwd73f/nTqwq4tqae7Mq0IEhmABDMAGGYK6BIZgODMH81yolxG1Bn9iI3p0ODMEEGIIJ8HJH+uVbhLILDcF0YAhmF7oEu9AsowNDMAGGYAJcQuJaNHHOx2MXGoLpwBDMLnQVcRvRltAV6MBVZOUha7Znx7t5TgfmjXz8+M3eU+hMBy4kpa2lzPMd2IWGYDowBHMNXE7x7Wjr51J04HIqJ6Ty3N6TAEMwAa6oZqOrOas3ZxcagunAEMwudHW7b0pbOVemA1e3b36ktzgBDrBXiqS3PgHOsH2WpDeCXWgIpgNDMLvQkQZtTVs2x7GEztYlyXKbS4CPYHGMRTedAB/NyzAL7ZEIMASzCw3BBBiCCTAEE2AIJsAQTIAhmABDMAGGYB/al//sPQdG+fH3/zh98Kd//mHfmTCIAB/TObqXxPh43Ep5ND98++n5gO9/+m6bmbAB18DH8cO3ny7TexnUy4+vhhFNB453N43f//TdD99+uv3z7sjxc2QUHTjYZS895fDyz1t3x2jI0QQ40il15yiee+zlgKsl9NXq+jTgXEGMQ/mdWEku++05w6cHT1G8yu2ty+ieD7z6oFlX53ANnOEqpe1eYs8f333w5YBHX4LKdODqnkS3/f+l7PS8XS65b3v4oy9BQR9+/N3f954DsJAldDlXF6K3bfD5flXfv15No2nIxVhCFzIlq88HzHW1fX21nL68YL5cqzcxLkMHLuFuMm8fuYrNZo9MmR670IH3dHddejcbU1K32O3byLed+Wpi1tVF6MD7eJTS6Q/eZqb7gysnyQZ04K3NCsD0+K13tw/ffrm7W2vedtqLDrydWSl99Piswb0enzu4ifFWdODhnlwoPon03cf3crU7/fxxl8db0oEHepLD5596dNLPbaebVVv2L2U9HXiIxdF99Kk27NL31u3F8NWn2r1W3B7M3+XxUDpwT8/XjWvyuazH7lL25XeoR59lAfdCQzAdeK2Xi8OXrWzl4c+72coBoyf//HBecg283JTT9+WAlfEb7cn1cJvwWwQeXTNfHf5oAC8J8GxTLuSmnJT103vyPMMvB7xMqbed1rCEnmFiLHuNeXkqlxqz5ZPDmQ48Scczr1eiNjalD7dXM5+yZraunkUHfmbium56dCcOm3Lilh3W8dmwrn5JB75vegfYJUh7edmH25zfj/ly2PlTGvIjAnxtVnSnj+x78nUvOCWZIwo+36a+HNbE+B4B/p9B0Z04spVvvyfTo949nGJ8yzXwvAutcYGcPnhQ2QpzmPudceLgA3vrDjw3jdMHt5Exq2DWkntW025zuvHEwQfmXmgI9l5L6AXrrrm90fgdx7/huvpdltALFloL1swLvkT6qTZ3+3riztay8W+4rj5+B94gum1RFB2ywYsy95A4R+7Am73k25zxlS14G3lB624zX6B3eNvpgB142YXQ4uguO2rB+XTIozZ72o96eXyoDrxlCNu22YiwrA+3+c/J4m4896j6DhLgjUO45sBlNv5y3e+sHPHlNgt/ZdkBXrMuWpP5ZQe2Q7ffk8XJn7s7vfLAyxgv+KJ1pF4Dr0zRmmMXv9i7dPv3mfBep8S+8jrwjtFdfGx7g957ac0KfE0rbktfptx1dVIHzo3fXi1038P3/dLtPbqxe6EhWOkOvP574fomsO8E1lfY9/AuE2jh58BQRQPc5WVbX2Hfc1eFXhUqnE6D1NrE6rKt3+W53v2cO5L17yqvrLB+j6rs205VOnCv1NUpsv41VuS2Qivz+q4v0sX+HbjUE1rkTD2kLn24rX56u7xjVOdtpz07cKnU9apTajJHrVNtMm2/GO/QgTteSHT8FtClDttYfLPHiDr7Xh5v2oE75qRvqV5PeqnOULZUzSm1emfmFBt14JpPUN/n2qXvROsvhq9KtR6tuHU6Hza+PB7bgfuuKyrnrWBXKV6t8sRa1zO2V7W7RnXg7mHrWK0VPnveR8c+3Lda927cq9pd7oWGYD2X0CP6ZPeCfb8LKnj4gsXP6g5L6BEL/RFLjuInytvqu5buXrD7plTft51WdeBBMUup2T29avYt2EJOpDU1F3bggv+SJ2Ujar65EX249X6lRrxFtLLmvA48aFt8XHQHlR2RXmUHlQ06uxbka2oHHrcPHnQqjCvLSfc+3Ma04kFlF7zt9DrAQ6M7rnJWzOImPCJpQw2acK9bwW7LtmkBeRbg0OgOqtwCY5Zo3LeG3cM2ovKda+Ch93/lBmxc8dBpDy2eO+02Mji3xb+6HRT3bzvXDy3OraFL9KFNvo3sxrfFf+nA6dEdXT+0eHr90cVb7Gl5Lv5fM2c4fi1qbfMAAAAASUVORK5CYII="
+}
