@@ -82,13 +82,17 @@ if [ -x "$DIST/bin/tomtom-control" ] &&
 	! pidof tt-control >/dev/null 2>&1; then
 	"$DIST/bin/tomtom-control" >>"$DIST/logs/tomtom-control.log" 2>&1 &
 fi
-
 # Start the Global Locate daemon for devices with the integrated GPS receiver.
 if [ -r /proc/barcelona/gldetected ] &&
 	[ "`cat /proc/barcelona/gldetected`" = "1" ] &&
 	[ -x "$DIST/bin/gltt" ] &&
 	! pidof gltt >/dev/null 2>&1; then
 	rc.gltt start 115200 >> "$DIST/logs/gps-start.log" 2>&1
+fi
+
+if [ -x "$DIST/bin/weather-sync" ] &&
+	! pidof weather-sync >/dev/null 2>&1; then
+	"$DIST/bin/weather-sync" >>"$DIST/logs/weather-sync.log" 2>&1 &
 fi
 
 # Suspend when the power button is pressed or the battery is low
@@ -109,6 +113,10 @@ do
 	if [ -x "$DIST/bin/tomtom-control" ] &&
 		! pidof tt-control >/dev/null 2>&1; then
 		"$DIST/bin/tomtom-control" >>"$DIST/logs/tomtom-control.log" 2>&1 &
+	fi
+	if [ -x "$DIST/bin/weather-sync" ] &&
+		! pidof weather-sync >/dev/null 2>&1; then
+		"$DIST/bin/weather-sync" >>"$DIST/logs/weather-sync.log" 2>&1 &
 	fi
 	if ! pidof watchface.new >/dev/null 2>&1; then
 		"$DIST/bin/watchface-main" >>"$DIST/logs/watchface.log" 2>&1 &

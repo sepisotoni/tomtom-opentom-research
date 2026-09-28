@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
@@ -40,7 +44,8 @@ enum WeatherAlert {
     WEATHER_ALERT_HEAT,
     WEATHER_ALERT_COLD,
     WEATHER_ALERT_HEAVY_RAIN,
-    WEATHER_ALERT_STORM
+    WEATHER_ALERT_STORM,
+    WEATHER_ALERT_SNOW
 };
 
 typedef struct {
@@ -49,6 +54,7 @@ typedef struct {
     enum WeatherCondition condition;
     int temperature_c;
     enum WeatherAlert alert;
+    int precipitation_probability;
 } WeatherDisplay;
 
 static unsigned short logical_pixels[LOGICAL_W * LOGICAL_H];
@@ -87,9 +93,82 @@ static char artwork_dir[160] = "/mnt/sdcard/opentom/preview-gallery";
 static char configured_atlas_paths[6][256];
 static volatile sig_atomic_t face_change_requested;
 static time_t last_face_selection_poll;
+static time_t last_weather_poll;
 static WeatherDisplay weather_display = {
-    0, 0, WEATHER_UNKNOWN, 0, WEATHER_ALERT_NONE
+    0, 0, WEATHER_UNKNOWN, 0, WEATHER_ALERT_NONE, 0
 };
+
+static int
+read_device_weather(WeatherDisplay *weather)
+{
+    struct sockaddr_in address;
+    struct timeval timeout;
+    char reply[96];
+    int fd;
+    int count;
+    int condition;
+    int temperature;
+    int alert;
+    int precipitation;
+    int noteworthy;
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return 0;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(18743);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+        send(fd, "WEATHER_STATUS\n", 15, 0) != 15) {
+        close(fd);
+        return 0;
+    }
+    count = (int)recv(fd, reply, sizeof(reply) - 1, 0);
+    close(fd);
+    if (count <= 0)
+        return 0;
+    reply[count] = '\0';
+    if (strcmp(reply, "OK WEATHER NONE\n") == 0) {
+        if (weather->available || weather->noteworthy) {
+            weather->available = 0;
+            weather->noteworthy = 0;
+            weather->condition = WEATHER_UNKNOWN;
+            weather->temperature_c = 0;
+            weather->alert = WEATHER_ALERT_NONE;
+            weather->precipitation_probability = 0;
+            return 1;
+        }
+        return 0;
+    }
+    if (sscanf(reply, "OK WEATHER %d %d %d %d %d",
+               &condition, &temperature, &alert, &precipitation,
+               &noteworthy) != 5 ||
+        condition < WEATHER_UNKNOWN || condition > WEATHER_STORM ||
+        temperature < -100 || temperature > 100 ||
+        alert < WEATHER_ALERT_NONE || alert > 5 ||
+        precipitation < 0 || precipitation > 100 ||
+        (noteworthy != 0 && noteworthy != 1))
+        return 0;
+    if (weather->available &&
+        weather->condition == (enum WeatherCondition)condition &&
+        weather->temperature_c == temperature &&
+        weather->alert == (enum WeatherAlert)alert &&
+        weather->precipitation_probability == precipitation &&
+        weather->noteworthy == noteworthy)
+        return 0;
+    weather->available = 1;
+    weather->condition = (enum WeatherCondition)condition;
+    weather->temperature_c = temperature;
+    weather->alert = (enum WeatherAlert)alert;
+    weather->precipitation_probability = precipitation;
+    weather->noteworthy = noteworthy;
+    return 1;
+}
 
 static int
 is_font_face(int face)
@@ -640,15 +719,17 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
     if (face == FACE_NUMERALS_DUO) {
         char seconds[3];
         GR_COLOR color = GR_RGB(255, 138, 36);
+        int weather_mode =
+            weather_display.available && weather_display.noteworthy;
 
         snprintf(seconds, sizeof(seconds), "%02d", second);
         if (night_mode)
             color = GR_RGB(255U * NIGHT_SCALE / 100U,
                            138U * NIGHT_SCALE / 100U,
                            36U * NIGHT_SCALE / 100U);
-        if (weather_display.available) {
-            GrCopyArea(window, gc, 12, 128, 76, 24, pixmap, 12, 128, 0);
-            put_text(window, gc, detail_font, seconds, 12, 148, color);
+        if (weather_mode) {
+            GrCopyArea(window, gc, 12, 156, 76, 24, pixmap, 12, 156, 0);
+            put_text(window, gc, detail_font, seconds, 12, 176, color);
             return;
         }
         GrCopyArea(window, gc, 284, 214, 36, 26, pixmap, 284, 214, 0);
@@ -839,6 +920,12 @@ draw_weather_icon(GR_DRAW_ID drawable, GR_GC_ID gc,
     }
 }
 
+static GR_COLOR
+weather_attribution_color(int night_mode)
+{
+    return night_mode ? GR_RGB(72, 84, 96) : GR_RGB(104, 118, 132);
+}
+
 static void
 draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
                     int night_mode, const WeatherDisplay *weather)
@@ -866,7 +953,11 @@ draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     }
 
     put_text(drawable, gc, font, "WEATHER ALERT", 88, 209, text);
-    if (weather->alert == WEATHER_ALERT_HEAT) {
+    if (weather->precipitation_probability >= 50) {
+        snprintf(details, sizeof(details), "%d C  %d%% PRECIP",
+                 weather->temperature_c,
+                 weather->precipitation_probability);
+    } else if (weather->alert == WEATHER_ALERT_HEAT) {
         snprintf(details, sizeof(details), "%d C  VERY HOT",
                  weather->temperature_c);
     } else if (weather->alert == WEATHER_ALERT_COLD) {
@@ -875,6 +966,9 @@ draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     } else if (weather->alert == WEATHER_ALERT_STORM) {
         snprintf(details, sizeof(details), "%d C  STORM",
                  weather->temperature_c);
+    } else if (weather->alert == WEATHER_ALERT_SNOW) {
+        snprintf(details, sizeof(details), "%d C  SNOW",
+                 weather->temperature_c);
     } else if (weather->alert == WEATHER_ALERT_HEAVY_RAIN) {
         snprintf(details, sizeof(details), "%d C  HEAVY RAIN",
                  weather->temperature_c);
@@ -882,6 +976,9 @@ draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
         snprintf(details, sizeof(details), "%d C  ALERT",
                  weather->temperature_c);
     }
+    put_text(drawable, gc, font,
+             "Source: Includes weather data from Google", 88, 190,
+             weather_attribution_color(night_mode));
     put_text(drawable, gc, font, details, 88, 227, text);
 }
 
@@ -891,17 +988,66 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
                  int battery_charging, int night_mode)
 {
     char date[32];
+    char details[32];
+    const char *condition = "WEATHER";
     GR_COLOR text = face_text_color(FACE_NUMERALS_DUO, night_mode);
     GR_COLOR outline = GR_RGB(70, 104, 132);
     GR_COLOR fill;
     int fill_width;
+    int weather_mode =
+        weather_display.available && weather_display.noteworthy;
+    int battery_y = weather_mode ? 211 : 70;
 
     if (night_mode)
         outline = GR_RGB(50, 75, 96);
     strftime(date, sizeof(date), "%a %d %b", local);
     put_text(drawable, gc, font, date, 12, 27, text);
-    put_text(drawable, gc, font, "BATTERY", 12, 58, text);
-    put_text(drawable, gc, font, "SECONDS", 12, 119, text);
+    if (weather_mode) {
+        switch (weather_display.condition) {
+        case WEATHER_SUNNY:
+            condition = "SUNNY";
+            break;
+        case WEATHER_CLOUDY:
+            condition = "CLOUDY";
+            break;
+        case WEATHER_PARTLY_CLOUDY:
+            condition = "PARTLY CLOUDY";
+            break;
+        case WEATHER_RAIN:
+            condition = "RAIN";
+            break;
+        case WEATHER_SNOW:
+            condition = "SNOW";
+            break;
+        case WEATHER_STORM:
+            condition = "STORM";
+            break;
+        default:
+            break;
+        }
+        draw_weather_icon(drawable, gc, weather_display.condition,
+                          112, 34, 1, night_mode);
+        put_text(drawable, gc, font, condition, 12, 55, text);
+        snprintf(details, sizeof(details), "%d C",
+                 weather_display.temperature_c);
+        put_text(drawable, gc, font, details, 12, 75, text);
+        if (weather_display.precipitation_probability >= 50) {
+            snprintf(details, sizeof(details), "%d%% PRECIP",
+                     weather_display.precipitation_probability);
+        } else {
+            strcpy(details, "WEATHER ALERT");
+        }
+        put_text(drawable, gc, font, details, 12, 95, text);
+        put_text(drawable, gc, font, "Source: Includes weather",
+                 12, 115, weather_attribution_color(night_mode));
+        put_text(drawable, gc, font, "data from Google",
+                 12, 127, weather_attribution_color(night_mode));
+        put_text(drawable, gc, font, "SECONDS", 12, 151, text);
+        put_text(drawable, gc, font, "BATTERY", 12, 199, text);
+    } else {
+        put_text(drawable, gc, font, "BATTERY", 12, 58, text);
+        put_text(drawable, gc, font, "SECONDS", 12, 119, text);
+    }
 
     if (battery_level < 0)
         battery_level = 0;
@@ -928,16 +1074,16 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
                       40U * NIGHT_SCALE / 100U);
 
     GrSetGCForeground(gc, outline);
-    GrRect(drawable, gc, 12, 70, 108, 19);
-    GrFillRect(drawable, gc, 121, 75, 4, 9);
+    GrRect(drawable, gc, 12, battery_y, 108, 19);
+    GrFillRect(drawable, gc, 121, battery_y + 5, 4, 9);
     if (fill_width > 0) {
         GrSetGCForeground(gc, fill);
-        GrFillRect(drawable, gc, 15, 73, fill_width, 13);
+        GrFillRect(drawable, gc, 15, battery_y + 3, fill_width, 13);
     }
     if (battery_charging) {
         GrSetGCForeground(gc, GR_RGB(255, 255, 255));
-        GrFillRect(drawable, gc, 62, 75, 3, 8);
-        GrFillRect(drawable, gc, 59, 78, 9, 3);
+        GrFillRect(drawable, gc, 62, battery_y + 5, 3, 8);
+        GrFillRect(drawable, gc, 59, battery_y + 8, 9, 3);
     }
 }
 
@@ -974,10 +1120,20 @@ draw_font_weather_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     }
     snprintf(temperature, sizeof(temperature), "%d C",
              weather->temperature_c);
+    draw_weather_icon(drawable, gc, weather->condition, 112, 48, 1,
+                      night_mode);
     put_text(drawable, gc, font, condition, 12, 94, text);
     put_text(drawable, gc, font, temperature, 12, 118, text);
-    if (weather->noteworthy)
+    if (weather->precipitation_probability >= 50) {
+        snprintf(temperature, sizeof(temperature), "%d%% PRECIP",
+                 weather->precipitation_probability);
+        put_text(drawable, gc, font, temperature, 12, 145, text);
+    } else if (weather->noteworthy) {
         put_text(drawable, gc, font, "WEATHER ALERT", 12, 145, text);
+    }
+    put_text(drawable, gc, font,
+             "Source: Includes weather data from Google", 12, 166,
+             weather_attribution_color(night_mode));
 }
 
 static void
@@ -1009,7 +1165,8 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
     int y;
     int font_face = is_font_face(face);
     int hour_only = local->tm_min == 0;
-    int numduo_has_info = weather_display.available;
+    int numduo_has_info =
+        weather_display.available && weather_display.noteworthy;
     int night_mode = local->tm_hour >= 22 || local->tm_hour < 7;
     int digit_width = config_stacked && !hour_only ? DIGIT_W / 2 : DIGIT_W;
     int digit_height = config_stacked && !hour_only ? DIGIT_H / 2 : DIGIT_H;
@@ -1026,10 +1183,10 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
                 logical_pixels[i * LOGICAL_W + 159] = divider;
             if (hour_only) {
                 for (i = 0; i < 2; ++i) {
-                    int x = font_face ? 166 + i * 76 : 164 + i * 78;
-                    int y = font_face ? 58 : 2;
-                    int digit_width = font_face ? 72 : 70;
-                    int digit_height = font_face ? 122 : 236;
+                    int x = 162 + i * 78;
+                    int y = 55;
+                    int digit_width = 76;
+                    int digit_height = 130;
 
                     draw_digit(outline_atlas, solid_atlas, rounded_atlas,
                                roboto_atlas, ubuntu_atlas, nunito_atlas,
@@ -1040,12 +1197,11 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
                 for (i = 0; i < 4; ++i) {
                     int row = i < 2 ? 0 : 1;
                     int column = i % 2;
-                    int x = font_face ? 174 + column * 58 :
-                                        164 + column * 78;
-                    int y = font_face ? 42 + row * 88 :
-                                        2 + row * 120;
-                    int digit_width = font_face ? 52 : 70;
-                    int digit_height = font_face ? 88 : 116;
+                    int x = font_face ? 164 + column * 74 :
+                                        162 + column * 78;
+                    int y = 1 + row * 119;
+                    int digit_width = font_face ? 70 : 76;
+                    int digit_height = 118;
 
                     draw_digit(outline_atlas, solid_atlas, rounded_atlas,
                                roboto_atlas, ubuntu_atlas, nunito_atlas,
@@ -1403,6 +1559,7 @@ main(int argc, char **argv)
         int redraw_base;
         int redraw_details;
         int battery_changed = 0;
+        int weather_changed = 0;
         int requested_face;
 
         GrGetNextEventTimeout(&event, FRAME_TIMEOUT_MS);
@@ -1414,6 +1571,10 @@ main(int argc, char **argv)
             requested_face = read_requested_face();
             if (requested_face >= 0)
                 current_face = requested_face;
+        }
+        if (current_time - last_weather_poll >= 15) {
+            last_weather_poll = current_time;
+            weather_changed = read_device_weather(&weather_display);
         }
         if (event.type == GR_EVENT_TYPE_BUTTON_DOWN &&
             (last_face_tap == 0 || current_time - last_face_tap >= 1)) {
@@ -1477,7 +1638,8 @@ main(int argc, char **argv)
                       local->tm_mon != last_month ||
                       local->tm_year != last_year ||
                       night_mode != last_night ||
-                      battery_changed;
+                      battery_changed ||
+                      weather_changed;
         redraw_details = redraw_base ||
                          local->tm_sec != last_second ||
                          colon_on != last_colon;

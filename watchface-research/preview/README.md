@@ -28,39 +28,44 @@ does not install or select a persistent face.
   Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
   to any contiguous range of styles available in the executable. Atlas paths
   are relative to `artwork_dir`.
-The running preview accepts a face index from the USB-only `tt-control`
+The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
-listens on `192.168.101.115:18743`, implements only `PING`, `STATUS`, and
-`SET_FACE <id>`, and is supervised by the device startup loop. Face selection
-is written atomically and retained across renderer restarts and device
-reboots. It does not provide a shell or general-purpose remote access.
+listens on `192.168.101.115:18743` and is supervised by the device startup
+loop. `PING`, `STATUS`, and `SET_FACE <id>` manage persistent face selection;
+`SET_WEATHER`, `WEATHER_STATUS`, and `CLEAR_WEATHER` manage only the current
+weather summary in RAM. Face selection is written atomically and retained
+across renderer restarts and device reboots. The service does not provide a
+shell or general-purpose remote access.
 
 ### USB control service build and protocol
 
 Build the service using the same OpenTom ARM GCC 3.3.4 toolchain used for the
 watchface, then place the output at
-`opentom_skel/bin/tt-control` in the deployed TomTom filesystem:
+`/mnt/sdcard/opentom/bin/tomtom-control` in the deployed TomTom filesystem:
 
 ```sh
 arm-linux-gcc -Wall -W -Werror -O2 \
-  -o tt-control \
+  -o tomtom-control \
   watchface-research/project/src/opentom_skel/bin/tomtom-control.c
 ```
 
-The startup script requires the binary as
-`/mnt/sdcard/opentom/bin/tt-control` and starts it through `bin/tomtom-control`
-after assigning the USB address. It checks the process at startup and
-periodically while the UI is running, restarting an exited service. The daemon
-listens only on `192.168.101.115:18743`, serves one short request per TCP
-connection, rejects peers outside `192.168.101.0/24`, and bounds request size
-and receive time. Its plain-text protocol is:
+The startup script assigns the USB address, then starts the daemon as
+`bin/tomtom-control`; it checks the process at startup and periodically while
+the UI is running, restarting an exited service. The daemon listens on
+`0.0.0.0:18743` so both loopback and the USB interface work, but rejects
+non-loopback peers outside `192.168.101.0/24`. It serves one short request per
+TCP connection and bounds request size and receive time. Its plain-text
+protocol is:
 
 | Request | Response | Effect |
 |---|---|---|
 | `PING` | `OK TOMTOM_CONTROL 1` | Confirms the service is responsive |
 | `STATUS` | `OK FACE <id>` | Reads the persisted built-in face ID |
 | `SET_FACE <id>` | `OK FACE <id>` | Validates `0`–`8` and atomically saves the ID |
+| `SET_WEATHER <condition> <C> <alert> <precip> <noteworthy>` | `OK WEATHER` | Updates the RAM-only summary |
+| `WEATHER_STATUS` | `OK WEATHER ...` or `OK WEATHER NONE` | Reads the RAM-only summary |
+| `CLEAR_WEATHER` | `OK WEATHER CLEARED` | Clears the RAM-only summary |
 
 Invalid IDs and unsupported commands receive `ERR ...` responses. The daemon
 has no shell, file-path, or arbitrary command interface. On the connected
@@ -109,15 +114,34 @@ Pass the optional atlases after the rounded atlas when launching the preview:
 The device build needs the TomTom ARM GCC 3.3.4 toolchain, Nano-X headers and
 library, and the matching Barcelona battery header. The toolchain and full
 OpenTom sysroot are external build inputs, not vendored in this repository.
-Compile against those inputs and write build products to a temporary or
-ignored build directory; do not commit device executables or deploy them as
-part of an artwork change.
+For this checkout, build the preview and its two companion daemons using the
+corresponding local input paths:
 
-Weather is not connected to a data source in this preview. Its weather state
-remains unavailable until the separate telemetry/data-source work is designed
-and implemented. Do not treat this visual preview as evidence of working
-weather data or package installation. The `MATERIAL_WEATHER_ICON_AUDIT.md`
-file inventories the related upstream icons and notes which weather conditions
-are not represented in Google's set. Selected source SVGs and the Apache-2.0
-license are kept in `assets/material-weather/`; the device preview does not yet
-render those SVGs or receive forecast data.
+```sh
+ARM_GCC=~/projects/tomtom-opentomresearch/OpenTom/gcc-3.3.4_glibc-2.3.2/bin/arm-linux-gcc
+NANOX=~/opentom-device-install/build/microwin
+KERNEL=~/opentom-device-install/src/linux-s3c24xx
+
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  -I"$NANOX/src/include" -I"$KERNEL/include" \
+  live_watchface.c -L"$NANOX/src/lib" -lnano-X -lm \
+  -o /tmp/watchface-weather
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  ../project/src/opentom_skel/bin/tomtom-control.c \
+  -o /tmp/tomtom-control
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  ../project/src/opentom_skel/bin/weather-sync.c \
+  -o /tmp/weather-sync
+```
+
+Use temporary or ignored build directories; do not commit generated device
+executables. `start.sh` starts the GPS daemon before `weather-sync`, then
+supervises both companion daemons. The worker accepts only checksum-valid RMC
+sentences with an active GPS fix, sends coordinates to the host relay with
+explicit location consent, and stores only the compact display summary in
+device RAM. The relay returns a `no-store` summary; the renderer suppresses
+ordinary conditions and shows noteworthy precipitation, storms, or
+temperature extremes. Weather icons are drawn natively. The
+`MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
+references and licensing; selected SVGs and the Apache-2.0 license are kept
+in `assets/material-weather/`.
