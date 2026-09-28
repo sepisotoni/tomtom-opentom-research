@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tomtom-weather-service
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: weather-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: GOOGLE_WEATHER_API_KEY
+        sync: false
+      - key: WEATHER_SERVICE_TOKEN
+        sync: false
