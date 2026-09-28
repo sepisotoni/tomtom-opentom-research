@@ -583,37 +583,30 @@ face_color565(int face, int minute_digit, int night_mode)
 static void
 blend_color_at(int x, int y, unsigned short color, unsigned int alpha)
 {
-    unsigned int source_red = ((color >> 11) & 31U) * 255U / 31U;
-    unsigned int source_green = ((color >> 5) & 63U) * 255U / 63U;
-    unsigned int source_blue = (color & 31U) * 255U / 31U;
+    unsigned short destination;
+    unsigned int inverse;
     unsigned int red;
     unsigned int green;
     unsigned int blue;
-    unsigned short destination;
 
     if (x < 0 || x >= LOGICAL_W || y < 0 || y >= LOGICAL_H || alpha == 0)
         return;
     if (alpha > 255U)
         alpha = 255U;
-    destination = logical_pixels[y * LOGICAL_W + x];
-    red = ((destination >> 11) & 31U) * 255U / 31U;
-    green = ((destination >> 5) & 63U) * 255U / 63U;
-    blue = (destination & 31U) * 255U / 31U;
-    red = (red * (255U - alpha) + source_red * alpha) / 255U;
-    green = (green * (255U - alpha) + source_green * alpha) / 255U;
-    blue = (blue * (255U - alpha) + source_blue * alpha) / 255U;
-    logical_pixels[y * LOGICAL_W + x] = color565(red, green, blue);
-}
-
-static void
-blend_at(int x, int y, unsigned int alpha, int face, int minute_digit)
-{
-    if (x < 0 || x >= LOGICAL_W || y < 0 || y >= LOGICAL_H || alpha == 0)
+    if (alpha == 255U) {
+        logical_pixels[y * LOGICAL_W + x] = color;
         return;
-    if (alpha > 255)
-        alpha = 255;
-    blend_color_at(x, y, face_color565(face, minute_digit,
-                                       current_night_mode), alpha);
+    }
+    destination = logical_pixels[y * LOGICAL_W + x];
+    inverse = 255U - alpha;
+    red = (((destination >> 11) & 31U) * inverse +
+           ((color >> 11) & 31U) * alpha + 127U) / 255U;
+    green = (((destination >> 5) & 63U) * inverse +
+             ((color >> 5) & 63U) * alpha + 127U) / 255U;
+    blue = ((destination & 31U) * inverse +
+            (color & 31U) * alpha + 127U) / 255U;
+    logical_pixels[y * LOGICAL_W + x] =
+        (unsigned short)((red << 11) | (green << 5) | blue);
 }
 
 static void
@@ -624,6 +617,7 @@ draw_digit(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
            unsigned int opacity, int face, int minute_digit)
 {
     const GlyphAtlas *atlas = outline_atlas;
+    unsigned short color;
     int px;
     int py;
 
@@ -639,19 +633,38 @@ draw_digit(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
     else if (face == FACE_AQUA_WAVE || face == FACE_LAVENDER ||
              face == FACE_SUNSET)
         atlas = solid_atlas;
-    for (py = 0; py < height; ++py) {
-        for (px = 0; px < width; ++px) {
-            int source_x = px * DIGIT_W / width;
-            int source_y = py * DIGIT_H / height;
-            unsigned int alpha;
+    if (width <= 0 || height <= 0 || opacity == 0)
+        return;
+    color = face_color565(face, minute_digit, current_night_mode);
+    {
+        int source_y = 0;
+        int source_y_remainder = 0;
 
-            if (face == FACE_NUMERALS_DUO)
-                alpha = sample_numeral_mask(rounded_atlas, solid_atlas,
-                                            digit, source_x, source_y);
-            else
-                alpha = sample_mask(atlas, digit, source_x, source_y);
-            alpha = alpha * opacity / 255U;
-            blend_at(x + px, y + py, alpha, face, minute_digit);
+        for (py = 0; py < height; ++py) {
+            int source_x = 0;
+            int source_x_remainder = 0;
+
+            for (px = 0; px < width; ++px) {
+                unsigned int alpha;
+
+                if (face == FACE_NUMERALS_DUO)
+                    alpha = sample_numeral_mask(rounded_atlas, solid_atlas,
+                                                digit, source_x, source_y);
+                else
+                    alpha = sample_mask(atlas, digit, source_x, source_y);
+                alpha = alpha * opacity / 255U;
+                blend_color_at(x + px, y + py, color, alpha);
+                source_x_remainder += DIGIT_W;
+                while (source_x_remainder >= width) {
+                    source_x_remainder -= width;
+                    ++source_x;
+                }
+            }
+            source_y_remainder += DIGIT_H;
+            while (source_y_remainder >= height) {
+                source_y_remainder -= height;
+                ++source_y;
+            }
         }
     }
 }
@@ -781,6 +794,9 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
         }
         return;
     }
+    /* Keep small seconds markers from covering the enlarged transition time. */
+    if (animation_progress > 0 && face != FACE_WEATHER)
+        return;
     GrCopyArea(window, gc, 145, 95, 30, 52, pixmap, 145, 95, 0);
     GrCopyArea(window, gc, 284, 214, 36, 26, pixmap, 284, 214, 0);
     if (show_colon && colon_on) {
@@ -1073,15 +1089,16 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
             strcpy(details, "WEATHER ALERT");
         }
         put_text(drawable, gc, font, details, 12, 95, text);
-        put_text(drawable, gc, font, "Source: Includes weather",
-                 12, 115,
+        put_text(drawable, gc, font, "Source: Includes", 12, 115,
                  fade_color_to_black(weather_attribution_color(night_mode),
                                      panel_alpha));
-        put_text(drawable, gc, font, "data from Google",
-                 12, 127,
+        put_text(drawable, gc, font, "weather data from", 12, 127,
                  fade_color_to_black(weather_attribution_color(night_mode),
                                      panel_alpha));
-        put_text(drawable, gc, font, "SECONDS", 12, 151, text);
+        put_text(drawable, gc, font, "Google", 12, 139,
+                 fade_color_to_black(weather_attribution_color(night_mode),
+                                     panel_alpha));
+        put_text(drawable, gc, font, "SECONDS", 12, 161, text);
         put_text(drawable, gc, font, "BATTERY", 12, 199, text);
     } else {
         put_text(drawable, gc, font, "BATTERY", 12, 58, text);
@@ -1173,8 +1190,13 @@ draw_font_weather_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     } else if (weather->noteworthy) {
         put_text(drawable, gc, font, "WEATHER ALERT", 12, 145, text);
     }
-    put_text(drawable, gc, font,
-             "Source: Includes weather data from Google", 12, 166,
+    put_text(drawable, gc, font, "Source: Includes", 12, 166,
+             fade_color_to_black(weather_attribution_color(night_mode),
+                                 panel_alpha));
+    put_text(drawable, gc, font, "weather data from", 12, 178,
+             fade_color_to_black(weather_attribution_color(night_mode),
+                                 panel_alpha));
+    put_text(drawable, gc, font, "Google", 12, 190,
              fade_color_to_black(weather_attribution_color(night_mode),
                                  panel_alpha));
 }
@@ -1573,9 +1595,6 @@ main(int argc, char **argv)
             advance_face();
         }
         animation_time = now_milliseconds();
-        ia_update(&info_animation,
-                  weather_display.available && weather_display.noteworthy,
-                  animation_time);
         ia_tick(&info_animation, animation_time);
         animation_progress = ia_progress(&info_animation, animation_time);
         animation_changed = animation_progress != last_animation_progress;

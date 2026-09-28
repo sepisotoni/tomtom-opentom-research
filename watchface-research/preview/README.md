@@ -18,9 +18,9 @@ does not install or select a persistent face.
 - `digit-atlas-roboto.pgm`, `digit-atlas-ubuntu.pgm`, and
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - The three font faces use a centered `HH` over `MM` layout, with an enlarged
-  hour-only view at `:00`. A noteworthy live weather summary moves time to the
-  right and shows condition/temperature in the left panel through a 600 ms
-  transition. Ordinary weather leaves the normal centered layout unchanged.
+  hour-only view at `:00`. A screen tap moves time to the right and reveals
+  condition/temperature in the left panel through a 600 ms transition.
+  Weather updates never open the panel automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen to
   animate the info panel; send `SIGUSR1` to cycle through local styles.
   Numerals Duo is style 5.
@@ -32,10 +32,12 @@ does not install or select a persistent face.
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
 Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
-The `info_anim/` module is integrated into this renderer: noteworthy weather
-automatically animates the clock into the info panel, and a screen tap toggles
-the panel without changing the selected face. Face selection remains
-available through Face Studio and `SIGUSR1`.
+The `info_anim/` module is integrated into this renderer. Only a screen tap
+opens or closes the info panel while the animation is being evaluated; weather
+updates do not trigger it. The required Google attribution is wrapped inside
+the info panel, and clock seconds are suppressed during the transition to
+avoid drawing over the enlarged time. Face selection remains available
+through Face Studio and `SIGUSR1`.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
@@ -150,7 +152,7 @@ sentences with an active GPS fix, sends coordinates to the host relay with
 explicit location consent, and stores only the compact display summary in
 device RAM. The relay returns a `no-store` summary; the renderer suppresses
 ordinary conditions and shows noteworthy precipitation, storms, or
-temperature extremes using the 600 ms clock-to-info animation. The current
+temperature extremes when the panel is opened by touch. The current
 preview draws weather glyphs with native
 Nano-X shapes; the Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon

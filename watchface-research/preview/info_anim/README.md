@@ -30,21 +30,18 @@ of Nano-X rendering or on-device performance.
 
 ## Integrated behavior
 
-- `live_watchface.c` initializes one `InfoAnim` state and updates it with the
-  current noteworthy-weather flag.
+- `live_watchface.c` initializes one `InfoAnim` state; weather updates do not
+  trigger animation while the interaction is being evaluated.
 - The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
   from the normal clock to the weather-panel layout.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
   the normal idle timeout remains one second.
-- A screen tap toggles the info panel. Face selection remains available
-  through Face Studio, the current-face file, and `SIGUSR1`.
-- Automatic changes use a 30-second dwell so a changing weather flag cannot
-  repeatedly flap the panel. Manual state remains until the weather flag
-  changes.
-- When noteworthy conditions arrive from the GPS weather relay, the Ubuntu
-  face shows the condition icon, temperature, precipitation/alert and
-  required subdued Google attribution. Normal conditions are not auto-shown,
-  but a tap can open their summary.
+- A screen tap is the only trigger that toggles the info panel. Face selection
+  remains available through Face Studio, the current-face file, and `SIGUSR1`.
+- When conditions arrive from the GPS weather relay, the Ubuntu face shows
+  the condition icon, temperature, precipitation/alert and required subdued
+  Google attribution after a tap. Attribution is wrapped within the info
+  panel so it cannot intrude into the clock area.
 - Weather state remains RAM-only; coordinates and forecasts are not written
   to persistent storage.
 
