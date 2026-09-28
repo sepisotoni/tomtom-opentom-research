@@ -20,7 +20,6 @@
 #define GPS_PIPE "/var/run/gpspipe"
 #define GPS_CONTROL "/dev/gps"
 #define REQUEST_INTERVAL_SECONDS (60 * 60)
-#define ERROR_RETRY_SECONDS (15 * 60)
 #define HTTP_BUFFER_SIZE 8192
 #define WEATHER_FETCH_FAILED 0
 #define WEATHER_FETCH_SUCCEEDED 1
@@ -372,7 +371,8 @@ poll_gps(void)
                         } else {
                             if (fetch_result == WEATHER_FETCH_SUCCEEDED)
                                 fprintf(stderr, "weather-sync: device update failed\n");
-                            next_request = time(NULL) + ERROR_RETRY_SECONDS;
+                            next_request = time(NULL) +
+                                REQUEST_INTERVAL_SECONDS;
                         }
                     }
                 }

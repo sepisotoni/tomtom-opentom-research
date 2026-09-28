@@ -150,10 +150,13 @@ executables. `start.sh` starts the GPS daemon before `weather-sync`, then
 supervises both companion daemons. The worker accepts only checksum-valid RMC
 sentences with an active GPS fix, sends coordinates to the host relay with
 explicit location consent, and stores only the compact display summary in
-device RAM. The relay returns a `no-store` summary; the renderer suppresses
-ordinary conditions and shows noteworthy precipitation, storms, or
-temperature extremes when the panel is opened by touch. The current
-preview draws weather glyphs with native
+device RAM. It makes at most one relay request per hour, including after an
+error or a rate-limit response. The renderer reads that RAM summary every 15
+seconds; this is a local cache refresh, not a weather-provider request. The
+relay returns a `no-store` summary; the renderer suppresses ordinary
+conditions and shows noteworthy precipitation, storms, or temperature
+extremes when the panel is opened by touch. The current preview draws weather
+glyphs with native
 Nano-X shapes; the Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
 references and licensing; selected SVGs and the Apache-2.0 license are kept
