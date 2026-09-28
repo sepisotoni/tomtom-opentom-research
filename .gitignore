@@ -32,3 +32,4 @@ Thumbs.db
 build/
 __pycache__/
 *.pyc
+/tomtom-relay/target/

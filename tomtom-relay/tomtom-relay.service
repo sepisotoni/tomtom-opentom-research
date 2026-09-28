@@ -1,0 +1,21 @@
+[Unit]
+Description=TomTom USB weather and asset relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/tomtom-relay/environment
+Environment=TOMTOM_STORAGE_DIR=%h/TomTomStorage
+ExecStart=%h/.local/bin/tomtom-relay
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+MemoryMax=64M
+CPUQuota=10%
+TasksMax=16
+LimitNOFILE=128
+UMask=0077
+
+[Install]
+WantedBy=default.target
