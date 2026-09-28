@@ -1,59 +1,62 @@
 # info_anim - clock <-> info-panel animation
 
-Separate module; `live_watchface.c` is untouched. Pure geometry + timing:
-no Nano-X, no drawing, no malloc, no floats, C89. It reproduces the timings
-of the React prototype (600 ms total: clock 0-500 ms, divider 100-600 ms,
-panel fade 200-600 ms, date out 0-280 ms / in 320-600 ms).
+This C89 geometry/timing module is integrated into `../live_watchface.c` for
+the Ubuntu, Roboto, Nunito, Numerals Duo, and generic preview faces. It
+contains no Nano-X calls, drawing, heap allocation, or floating-point math.
+The renderer supplies the geometry and fades the weather panel and dates.
+Animation timing: 600 ms total (clock 0-500 ms, divider 100-600 ms, panel fade
+200-600 ms, date out 0-280 ms / in 320-600 ms).
 
 | File | Purpose |
 |---|---|
-| `info_anim.h/.c` | the module |
-| `info_anim_lut.h` | generated easing tables (`gen_ease_lut.py`) |
-| `test_info_anim.c` | host tests (379 checks) + `dump` mode |
-| `preview_filmstrip.py` | renders the module's real output with the digit atlas |
+| `info_anim.h/.c` | Geometry and animation state |
+| `info_anim_lut.h` | Generated easing tables |
+| `test_info_anim.c` | Host tests (379 checks) and `dump` mode |
+| `preview_filmstrip.py` | Filmstrip using animation output and digit atlases |
 
 ## Build / test on the PC
 
-    gcc -std=c89 -pedantic -Wall -Wextra -Werror -O2 info_anim.c test_info_anim.c -o /tmp/t_ia && /tmp/t_ia
-    python3 preview_filmstrip.py /tmp/t_ia filmstrip.png
+From this directory:
 
-## Integration sketch (in live_watchface.c)
+```sh
+gcc -std=c89 -pedantic -Wall -Wextra -Werror -O2 \
+  info_anim.c test_info_anim.c -o /tmp/t_ia
+/tmp/t_ia
+python3 preview_filmstrip.py /tmp/t_ia /tmp/info-animation.png
+```
 
-1. `static InfoAnim anim;` -> `ia_init(&anim);` once. Add `info_anim.c` to the build.
-2. Millisecond clock (wraps harmlessly, the module works modulo 2^32):
+The filmstrip includes an Ubuntu atlas row. It is a layout aid, not evidence
+of Nano-X rendering or on-device performance.
 
-        static unsigned long now_ms(void)
-        {
-            struct timeval tv;
-            gettimeofday(&tv, NULL);
-            return (unsigned long)tv.tv_sec * 1000UL + (unsigned long)(tv.tv_usec / 1000);
-        }
+## Integrated behavior
 
-3. Every loop: `t = now_ms(); ia_update(&anim, weather_display.available && weather_display.noteworthy, t); ia_tick(&anim, t);`
-4. Wait time: `ia_active(&anim, t) ? 33 : FRAME_TIMEOUT_MS` for `GrGetNextEventTimeout`.
-   While active, force `redraw_base = 1`. When idle the 1000 ms wake-up is unchanged.
-5. `BUTTON_DOWN` -> `ia_tap(&anim, t)` (position is ignored; see below).
-6. In `draw_frame`: `p = ia_progress(&anim, t)`; if `p > 0` take digit rects from
-   `ia_digit_rect(ia_layout_for(kind, config_stacked, hour_only), i, p, &r)` instead of the fixed
-   tables; divider height = `240 * ia_divider(p) / IA_ONE`; fade the weather content with
-   `ia_panel_alpha(p)`; draw the date at `base_x + dx` with `ia_date()` (draw an instance only when
-   its alpha > 0) and fade text with `ia_blend565(background, colour, alpha)`.
-7. `kind`: `IA_KIND_NUMERALS` for Numerals Duo, `IA_KIND_FONT` for Roboto/Ubuntu/Nunito,
-   else `IA_KIND_GENERIC`. `hour_only = local->tm_min == 0`.
+- `live_watchface.c` initializes one `InfoAnim` state and updates it with the
+  current noteworthy-weather flag.
+- The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
+  from the normal clock to the weather-panel layout.
+- The event timeout drops to 33 ms only while the 600 ms transition is active;
+  the normal idle timeout remains one second.
+- A screen tap toggles the info panel. Face selection remains available
+  through Face Studio, the current-face file, and `SIGUSR1`.
+- Automatic changes use a 30-second dwell so a changing weather flag cannot
+  repeatedly flap the panel. Manual state remains until the weather flag
+  changes.
+- When noteworthy conditions arrive from the GPS weather relay, the Ubuntu
+  face shows the condition icon, temperature, precipitation/alert and
+  required subdued Google attribution. Normal conditions are not auto-shown,
+  but a tap can open their summary.
+- Weather state remains RAM-only; coordinates and forecasts are not written
+  to persistent storage.
 
-## Behaviour notes
+The device renderer build links both `live_watchface.c` and
+`info_anim/info_anim.c`. The exact ARM GCC 3.3.4 and Nano-X build command is in
+the parent `README.md`. CPU and battery cost during the brief animation
+should be measured on the physical device.
 
-* One master progress value drives everything, so reversing mid-animation runs backwards
-  from the current point: no restart, no jump.
-* Auto mode has 30 s hysteresis (`IA_DWELL_MS`) so a flapping weather flag can't make the panel
-  flap. A tap overrides instantly and lasts until the noteworthy flag next changes.
-* A clock that jumps backwards (GPS time sync) is treated as "just started"; the animation stays
-  in range.
-* Layout tables copy the numbers in `draw_frame`; each row cites its source. Re-sync if those change.
-* If `hour_only` flips (59 -> 00) *during* an animation, the layout switches at that frame (a snap).
+## Animation module behavior
 
-## Not verified
-
-Not compiled with the ARM GCC 3.3.4 toolchain and not run on a TomTom. Host checks: strict
-`-std=c89 -pedantic`, ASan/UBSan, and a simulated 32-bit counter wrap (a real 32-bit build was not
-possible on the authoring machine). Per-frame cost of a full `draw_frame` on the 266 MHz CPU is unmeasured.
+One master fixed-point progress value drives all geometry and opacity. A
+reversal mid-animation continues from the current position without a jump.
+The module handles short millisecond-counter wrap and backwards clock steps.
+If `hour_only` changes at the minute boundary while an animation is active,
+the selected layout changes on that frame.

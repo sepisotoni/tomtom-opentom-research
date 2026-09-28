@@ -10,17 +10,24 @@ device.
   python3 preview_filmstrip.py /tmp/t_ia filmstrip.png
 """
 import csv, io, subprocess, sys
+from pathlib import Path
 from PIL import Image, ImageDraw
 
-ATLAS = "../digit-atlas-numerals.pgm"
+PREVIEW_DIR = Path(__file__).resolve().parent.parent
 CELL_W, CELL_H = 100, 170
 BG = (8, 10, 12)
 ORANGE = (255, 138, 36)
 MODES = [  # title, kind, stacked, hour_only, digits
-    ("Side-by-side (generic) -> info", 0, 0, 0, "1234"),
-    ("Stacked (Numerals Duo) -> info", 1, 1, 0, "1234"),
-    ("Stacked, hour only (min = 00) -> info", 1, 1, 1, "12"),
-    ("Side-by-side, hour only -> info", 0, 0, 1, "12"),
+    ("Side-by-side (generic) -> info", 0, 0, 0, "1234",
+     "digit-atlas.pgm"),
+    ("Stacked (Numerals Duo) -> info", 1, 1, 0, "1234",
+     "digit-atlas-numerals.pgm"),
+    ("Stacked, hour only (min = 00) -> info", 1, 1, 1, "12",
+     "digit-atlas-numerals.pgm"),
+    ("Side-by-side, hour only -> info", 0, 0, 1, "12",
+     "digit-atlas.pgm"),
+    ("Ubuntu font -> info", 2, 1, 0, "1234",
+     "digit-atlas-ubuntu.pgm"),
 ]
 FRAMES_MS = [0, 100, 200, 300, 400, 500, 600]
 SCALE = 2          # 320x240 -> 160x120
@@ -64,14 +71,14 @@ def frame(row, digits, atlas):
 
 def main():
     binary, out = sys.argv[1], sys.argv[2]
-    atlas = Image.open(ATLAS).convert("L")
     fw, fh = 320 // SCALE, 240 // SCALE
     pad, top = 6, 16
     sheet = Image.new("RGB", (len(FRAMES_MS) * (fw + pad) + pad,
                               len(MODES) * (fh + top + pad) + pad), (30, 30, 34))
     d = ImageDraw.Draw(sheet)
-    for r, (title, kind, stacked, hour, digits) in enumerate(MODES):
+    for r, (title, kind, stacked, hour, digits, atlas_name) in enumerate(MODES):
         rows = run_dump(binary, kind, stacked, hour)
+        atlas = Image.open(PREVIEW_DIR / atlas_name).convert("L")
         y0 = pad + r * (fh + top + pad)
         d.text((pad, y0), title, fill=(220, 220, 220))
         for c, t in enumerate(FRAMES_MS):

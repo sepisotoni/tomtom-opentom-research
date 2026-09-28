@@ -17,9 +17,10 @@ For icon, artwork, or animation tasks, start with:
 The actual device is a 320x240 RGB565 Nano-X display. Do not create browser
 mockups or add HTML/JavaScript for embedded rendering. Keep editable artwork
 and generated assets together under `watchface-research/preview/`. Use the
-existing 320x240 Nano-X renderer for device-oriented previews, and keep new
-icon animation code separate from the production packaged-face runtime unless
-the task explicitly asks to integrate it.
+existing 320x240 Nano-X renderer for device-oriented previews. The C89
+`watchface-research/preview/info_anim/` module is integrated into
+`preview/live_watchface.c`; this is distinct from the production
+packaged-face runtime.
 
 Use `watchface-research/preview/convert_icon.py` to convert a transparent PNG
 into a bounded C89 RGB565 sprite header. Commit the editable source image and

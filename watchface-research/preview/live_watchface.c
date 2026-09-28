@@ -13,6 +13,7 @@
 
 #include "nano-X.h"
 #include <barcelona/Barc_Battery.h>
+#include "info_anim/info_anim.h"
 
 #define LOGICAL_W 320
 #define LOGICAL_H 240
@@ -94,6 +95,8 @@ static char configured_atlas_paths[6][256];
 static volatile sig_atomic_t face_change_requested;
 static time_t last_face_selection_poll;
 static time_t last_weather_poll;
+static InfoAnim info_animation;
+static int last_animation_progress = -1;
 static WeatherDisplay weather_display = {
     0, 0, WEATHER_UNKNOWN, 0, WEATHER_ALERT_NONE, 0
 };
@@ -174,6 +177,19 @@ static int
 is_font_face(int face)
 {
     return face >= FACE_FONT_ROBOTO && face <= FACE_FONT_NUNITO;
+}
+
+static unsigned long
+now_milliseconds(void)
+{
+    struct timeval now;
+
+    if (gettimeofday(&now, NULL) != 0) {
+        perror("cannot read animation clock");
+        return 0;
+    }
+    return (unsigned long)now.tv_sec * 1000UL +
+        (unsigned long)(now.tv_usec / 1000);
 }
 
 static void
@@ -370,6 +386,21 @@ color565(unsigned int red, unsigned int green, unsigned int blue)
     return (unsigned short)(((red >> 3) << 11) |
                             ((green >> 2) << 5) |
                             (blue >> 3));
+}
+
+static GR_COLOR
+fade_color_to_black(GR_COLOR color, int alpha)
+{
+    unsigned int red = color & 255U;
+    unsigned int green = (color >> 8) & 255U;
+    unsigned int blue = (color >> 16) & 255U;
+    unsigned short blended =
+        ia_blend565(0, color565(red, green, blue), alpha);
+
+    red = ((blended >> 11) & 31U) * 255U / 31U;
+    green = ((blended >> 5) & 63U) * 255U / 63U;
+    blue = (blended & 31U) * 255U / 31U;
+    return GR_RGB(red, green, blue);
 }
 
 static unsigned short
@@ -703,7 +734,8 @@ put_text(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
 static void
 draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
                   GR_FONT_ID detail_font, int second, int colon_on,
-                  int show_colon, int night_mode, int face)
+                  int show_colon, int night_mode, int face,
+                  int animation_progress)
 {
     static const int circle_half_width[9] = {
         0, 2, 3, 3, 4, 3, 3, 2, 0
@@ -720,7 +752,7 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
         char seconds[3];
         GR_COLOR color = GR_RGB(255, 138, 36);
         int weather_mode =
-            weather_display.available && weather_display.noteworthy;
+            weather_display.available && animation_progress > 0;
 
         snprintf(seconds, sizeof(seconds), "%02d", second);
         if (night_mode)
@@ -850,7 +882,7 @@ draw_weather_mask(GR_DRAW_ID drawable, GR_GC_ID gc,
 static void
 draw_weather_icon(GR_DRAW_ID drawable, GR_GC_ID gc,
                   enum WeatherCondition condition, int x, int y,
-                  int scale, int night_mode)
+                  int scale, int night_mode, int opacity)
 {
     static const unsigned short sun_rows[16] = {
         0x0180, 0x0180, 0x0180, 0x0180,
@@ -881,6 +913,11 @@ draw_weather_icon(GR_DRAW_ID drawable, GR_GC_ID gc,
         snow = GR_RGB(154, 169, 179);
         bolt = GR_RGB(179, 155, 54);
     }
+    sun = fade_color_to_black(sun, opacity);
+    cloud = fade_color_to_black(cloud, opacity);
+    rain = fade_color_to_black(rain, opacity);
+    snow = fade_color_to_black(snow, opacity);
+    bolt = fade_color_to_black(bolt, opacity);
 
     if (condition == WEATHER_SUNNY ||
         condition == WEATHER_PARTLY_CLOUDY)
@@ -941,7 +978,7 @@ draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     draw_weather_icon(drawable, gc,
                       weather->available ? weather->condition :
                       WEATHER_UNKNOWN,
-                      icon_x, icon_y, 2, night_mode);
+                      icon_x, icon_y, 2, night_mode, 255);
     if (!weather->available) {
         int badge_x = 36;
         int badge_y = 190;
@@ -984,24 +1021,22 @@ draw_weather_widget(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
 
 static void
 draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
-                 const struct tm *local, int battery_level,
-                 int battery_charging, int night_mode)
+                 int battery_level, int battery_charging, int night_mode,
+                 int panel_alpha)
 {
-    char date[32];
     char details[32];
     const char *condition = "WEATHER";
-    GR_COLOR text = face_text_color(FACE_NUMERALS_DUO, night_mode);
+    GR_COLOR text = fade_color_to_black(
+        face_text_color(FACE_NUMERALS_DUO, night_mode), panel_alpha);
     GR_COLOR outline = GR_RGB(70, 104, 132);
     GR_COLOR fill;
     int fill_width;
-    int weather_mode =
-        weather_display.available && weather_display.noteworthy;
+    int weather_mode = weather_display.available;
     int battery_y = weather_mode ? 211 : 70;
 
     if (night_mode)
         outline = GR_RGB(50, 75, 96);
-    strftime(date, sizeof(date), "%a %d %b", local);
-    put_text(drawable, gc, font, date, 12, 27, text);
+    outline = fade_color_to_black(outline, panel_alpha);
     if (weather_mode) {
         switch (weather_display.condition) {
         case WEATHER_SUNNY:
@@ -1026,7 +1061,7 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
             break;
         }
         draw_weather_icon(drawable, gc, weather_display.condition,
-                          112, 34, 1, night_mode);
+                          112, 34, 1, night_mode, panel_alpha);
         put_text(drawable, gc, font, condition, 12, 55, text);
         snprintf(details, sizeof(details), "%d C",
                  weather_display.temperature_c);
@@ -1039,9 +1074,13 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
         }
         put_text(drawable, gc, font, details, 12, 95, text);
         put_text(drawable, gc, font, "Source: Includes weather",
-                 12, 115, weather_attribution_color(night_mode));
+                 12, 115,
+                 fade_color_to_black(weather_attribution_color(night_mode),
+                                     panel_alpha));
         put_text(drawable, gc, font, "data from Google",
-                 12, 127, weather_attribution_color(night_mode));
+                 12, 127,
+                 fade_color_to_black(weather_attribution_color(night_mode),
+                                     panel_alpha));
         put_text(drawable, gc, font, "SECONDS", 12, 151, text);
         put_text(drawable, gc, font, "BATTERY", 12, 199, text);
     } else {
@@ -1072,6 +1111,7 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
         fill = GR_RGB(136U * NIGHT_SCALE / 100U,
                       220U * NIGHT_SCALE / 100U,
                       40U * NIGHT_SCALE / 100U);
+    fill = fade_color_to_black(fill, panel_alpha);
 
     GrSetGCForeground(gc, outline);
     GrRect(drawable, gc, 12, battery_y, 108, 19);
@@ -1081,7 +1121,8 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
         GrFillRect(drawable, gc, 15, battery_y + 3, fill_width, 13);
     }
     if (battery_charging) {
-        GrSetGCForeground(gc, GR_RGB(255, 255, 255));
+        GrSetGCForeground(gc, fade_color_to_black(
+            GR_RGB(255, 255, 255), panel_alpha));
         GrFillRect(drawable, gc, 62, battery_y + 5, 3, 8);
         GrFillRect(drawable, gc, 59, battery_y + 8, 9, 3);
     }
@@ -1090,11 +1131,12 @@ draw_numduo_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
 static void
 draw_font_weather_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
                        int face, int night_mode,
-                       const WeatherDisplay *weather)
+                       const WeatherDisplay *weather, int panel_alpha)
 {
     const char *condition = "WEATHER";
     char temperature[16];
-    GR_COLOR text = face_text_color(face, night_mode);
+    GR_COLOR text =
+        fade_color_to_black(face_text_color(face, night_mode), panel_alpha);
 
     switch (weather->condition) {
     case WEATHER_SUNNY:
@@ -1121,7 +1163,7 @@ draw_font_weather_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     snprintf(temperature, sizeof(temperature), "%d C",
              weather->temperature_c);
     draw_weather_icon(drawable, gc, weather->condition, 112, 48, 1,
-                      night_mode);
+                      night_mode, panel_alpha);
     put_text(drawable, gc, font, condition, 12, 94, text);
     put_text(drawable, gc, font, temperature, 12, 118, text);
     if (weather->precipitation_probability >= 50) {
@@ -1133,7 +1175,8 @@ draw_font_weather_info(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     }
     put_text(drawable, gc, font,
              "Source: Includes weather data from Google", 12, 166,
-             weather_attribution_color(night_mode));
+             fade_color_to_black(weather_attribution_color(night_mode),
+                                 panel_alpha));
 }
 
 static void
@@ -1144,16 +1187,21 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
            GR_FONT_ID detail_font, unsigned short *output,
            int width, int height, const int digits[4],
            const struct tm *local, int battery_level, int battery_charging,
-           int face)
+           int face, int animation_progress)
 {
-    static const int digit_x[4] = {8, 82, 170, 244};
-    static const int stacked_x[4] = {112, 173, 112, 173};
-    static const int hour_only_x[2] = {86, 160};
+    const IaLayout *layout;
+    IaRect digit_rect;
     GR_SIZE text_width;
     GR_SIZE text_height;
     GR_SIZE text_base;
+    GR_COLOR date_color;
     char date[32];
     char ampm[3];
+    int center_date_dx;
+    int center_date_alpha;
+    int left_date_dx;
+    int left_date_alpha;
+    int panel_alpha;
     int scale_num;
     int scale_den;
     int content_w;
@@ -1166,104 +1214,33 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
     int font_face = is_font_face(face);
     int hour_only = local->tm_min == 0;
     int numduo_has_info =
-        weather_display.available && weather_display.noteworthy;
+        weather_display.available && animation_progress > 0;
     int night_mode = local->tm_hour >= 22 || local->tm_hour < 7;
-    int digit_width = config_stacked && !hour_only ? DIGIT_W / 2 : DIGIT_W;
-    int digit_height = config_stacked && !hour_only ? DIGIT_H / 2 : DIGIT_H;
+    int layout_kind = face == FACE_NUMERALS_DUO ? IA_KIND_NUMERALS :
+        (font_face ? IA_KIND_FONT : IA_KIND_GENERIC);
 
     current_night_mode = night_mode;
+    panel_alpha = ia_panel_alpha(animation_progress);
     for (i = 0; i < LOGICAL_W * LOGICAL_H; ++i)
         logical_pixels[i] = face_background(night_mode);
-    if (face == FACE_NUMERALS_DUO || font_face) {
-        if (numduo_has_info) {
-            unsigned short divider = color565(14, 30, 40);
-
-            for (i = font_face ? 40 : 0;
-                 i < (font_face ? 220 : LOGICAL_H); ++i)
-                logical_pixels[i * LOGICAL_W + 159] = divider;
-            if (hour_only) {
-                for (i = 0; i < 2; ++i) {
-                    int x = 162 + i * 78;
-                    int y = 55;
-                    int digit_width = 76;
-                    int digit_height = 130;
-
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], x, y, digit_width, digit_height,
-                               255U, face, 0);
-                }
-            } else {
-                for (i = 0; i < 4; ++i) {
-                    int row = i < 2 ? 0 : 1;
-                    int column = i % 2;
-                    int x = font_face ? 164 + column * 74 :
-                                        162 + column * 78;
-                    int y = 1 + row * 119;
-                    int digit_width = font_face ? 70 : 76;
-                    int digit_height = 118;
-
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], x, y, digit_width, digit_height,
-                               255U, face, row);
-                }
-            }
-        } else if (font_face) {
-            if (hour_only) {
-                for (i = 0; i < 2; ++i)
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], 46 + i * 116, 40, 112, 176,
-                               255U, face, 0);
-            } else {
-                for (i = 0; i < 4; ++i) {
-                    int row = i < 2 ? 0 : 1;
-                    int column = i % 2;
-
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], 101 + column * 63,
-                               42 + row * 88, 55, 88,
-                               255U, face, row);
-                }
-            }
-        } else {
-            if (hour_only) {
-                for (i = 0; i < 2; ++i)
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], 45 + i * 120, 35, 110, 190,
-                               255U, face, 0);
-            } else {
-                for (i = 0; i < 4; ++i) {
-                    int row = i < 2 ? 0 : 1;
-                    int column = i % 2;
-
-                    draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                               roboto_atlas, ubuntu_atlas, nunito_atlas,
-                               digits[i], 83 + column * 84,
-                               row == 0 ? 38 : 128, 70, 82,
-                               255U, face, row);
-                }
-            }
-            draw_battery(battery_level, battery_charging,
-                         night_mode, face);
-        }
-        if (font_face)
-            draw_battery(battery_level, battery_charging, night_mode, face);
-    } else {
-        for (x = 0; x < (hour_only ? 2 : 4); ++x)
-            draw_digit(outline_atlas, solid_atlas, rounded_atlas,
-                       roboto_atlas, ubuntu_atlas, nunito_atlas, digits[x],
-                       hour_only ? hour_only_x[x] :
-                           (config_stacked ? stacked_x[x] : digit_x[x]),
-                       config_stacked && !hour_only ?
-                           (x < 2 ? 34 : 126) : DIGIT_Y,
-                       digit_width, digit_height, 255U, face,
-                       !hour_only && x >= 2);
-        draw_battery(battery_level, battery_charging, night_mode, face);
+    layout = ia_layout_for(layout_kind, config_stacked, hour_only);
+    for (x = 0; x < layout->n; ++x) {
+        ia_digit_rect(layout, x, animation_progress, &digit_rect);
+        draw_digit(outline_atlas, solid_atlas, rounded_atlas,
+                   roboto_atlas, ubuntu_atlas, nunito_atlas, digits[x],
+                   digit_rect.x, digit_rect.y, digit_rect.w, digit_rect.h,
+                   255U, face, !hour_only && x >= 2);
     }
+    if (numduo_has_info) {
+        int divider_height = LOGICAL_H * ia_divider(animation_progress) /
+            IA_ONE;
+        unsigned short divider = color565(14, 30, 40);
+
+        for (i = 0; i < divider_height; ++i)
+            logical_pixels[i * LOGICAL_W + 159] = divider;
+    }
+    if (face != FACE_NUMERALS_DUO)
+        draw_battery(battery_level, battery_charging, night_mode, face);
 
     if (width * LOGICAL_H <= height * LOGICAL_W) {
         scale_num = width;
@@ -1293,38 +1270,39 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
     }
     if (font_face && numduo_has_info)
         draw_font_weather_info(pixmap, gc, detail_font, face,
-                               night_mode, &weather_display);
-    if (face == FACE_NUMERALS_DUO) {
-        if (numduo_has_info) {
-            draw_numduo_info(pixmap, gc, detail_font, local, battery_level,
-                             battery_charging, night_mode);
-        } else {
-            strftime(date, sizeof(date), "%a %d %b", local);
-            GrGetGCTextSize(gc, date, -1, GR_TFBASELINE,
-                            &text_width, &text_height, &text_base);
-            put_text(pixmap, gc, detail_font, date,
-                     (width - (int)text_width) / 2,
-                     27 * scale_num / scale_den,
-                     face_text_color(face, night_mode));
-        }
-    } else {
-        strftime(date, sizeof(date), "%a %d %b", local);
-        strcpy(ampm, local->tm_hour >= 12 ? "PM" : "AM");
-        GrGetGCTextSize(gc, date, -1, GR_TFBASELINE,
-                        &text_width, &text_height, &text_base);
+                               night_mode, &weather_display, panel_alpha);
+    if (face == FACE_NUMERALS_DUO && numduo_has_info)
+        draw_numduo_info(pixmap, gc, detail_font, battery_level,
+                         battery_charging, night_mode, panel_alpha);
+
+    strftime(date, sizeof(date), "%a %d %b", local);
+    strcpy(ampm, local->tm_hour >= 12 ? "PM" : "AM");
+    GrGetGCTextSize(gc, date, -1, GR_TFBASELINE,
+                    &text_width, &text_height, &text_base);
+    ia_date(animation_progress, &center_date_dx, &center_date_alpha,
+            &left_date_dx, &left_date_alpha);
+    date_color = face_text_color(face, night_mode);
+    if (center_date_alpha > 0)
         put_text(pixmap, gc, detail_font, date,
-                 offset_x + (content_w - (int)text_width) / 2,
+                 offset_x + (content_w - (int)text_width) / 2 +
+                    center_date_dx * scale_num / scale_den,
+                 offset_y + (face == FACE_NUMERALS_DUO ? 27 : 31) *
+                    scale_num / scale_den,
+                 fade_color_to_black(date_color, center_date_alpha));
+    if (left_date_alpha > 0)
+        put_text(pixmap, gc, detail_font, date,
+                 offset_x + 12 * scale_num / scale_den +
+                    left_date_dx * scale_num / scale_den,
                  offset_y + 31 * scale_num / scale_den,
+                 fade_color_to_black(date_color, left_date_alpha));
+    if (config_12hour && config_show_ampm) {
+        GrGetGCTextSize(gc, ampm, -1, GR_TFBASELINE,
+                        &text_width, &text_height, &text_base);
+        put_text(pixmap, gc, detail_font, ampm,
+                 offset_x + content_w - (int)text_width -
+                    12 * scale_num / scale_den,
+                 offset_y + 40 * scale_num / scale_den,
                  face_text_color(face, night_mode));
-        if (config_12hour && config_show_ampm) {
-            GrGetGCTextSize(gc, ampm, -1, GR_TFBASELINE,
-                            &text_width, &text_height, &text_base);
-            put_text(pixmap, gc, detail_font, ampm,
-                     offset_x + content_w - (int)text_width -
-                        12 * scale_num / scale_den,
-                     offset_y + 40 * scale_num / scale_den,
-                     face_text_color(face, night_mode));
-        }
     }
     if (face == FACE_WEATHER)
         draw_weather_widget(pixmap, gc, detail_font, night_mode,
@@ -1547,8 +1525,10 @@ main(int argc, char **argv)
     battery_fd = open("/dev/battery", O_RDONLY);
     if (battery_fd < 0)
         perror("cannot open /dev/battery");
+    ia_init(&info_animation);
 
     for (;;) {
+        unsigned long animation_time;
         time_t current_time;
         struct tm *local;
         int next_digits[4];
@@ -1560,9 +1540,16 @@ main(int argc, char **argv)
         int redraw_details;
         int battery_changed = 0;
         int weather_changed = 0;
+        int animation_changed;
+        int animation_progress;
         int requested_face;
 
-        GrGetNextEventTimeout(&event, FRAME_TIMEOUT_MS);
+        animation_time = now_milliseconds();
+        ia_tick(&info_animation, animation_time);
+        GrGetNextEventTimeout(
+            &event,
+            ia_active(&info_animation, animation_time) ?
+                33L : FRAME_TIMEOUT_MS);
         if (event.type == GR_EVENT_TYPE_CLOSE_REQ)
             break;
         current_time = time(NULL);
@@ -1578,12 +1565,20 @@ main(int argc, char **argv)
         }
         if (event.type == GR_EVENT_TYPE_BUTTON_DOWN &&
             (last_face_tap == 0 || current_time - last_face_tap >= 1)) {
-            advance_face();
+            animation_time = now_milliseconds();
+            ia_tap(&info_animation, animation_time);
             last_face_tap = current_time;
         } else if (face_change_requested) {
             face_change_requested = 0;
             advance_face();
         }
+        animation_time = now_milliseconds();
+        ia_update(&info_animation,
+                  weather_display.available && weather_display.noteworthy,
+                  animation_time);
+        ia_tick(&info_animation, animation_time);
+        animation_progress = ia_progress(&info_animation, animation_time);
+        animation_changed = animation_progress != last_animation_progress;
         local = localtime(&current_time);
         if (local == NULL)
             continue;
@@ -1639,7 +1634,8 @@ main(int argc, char **argv)
                       local->tm_year != last_year ||
                       night_mode != last_night ||
                       battery_changed ||
-                      weather_changed;
+                      weather_changed ||
+                      animation_changed;
         redraw_details = redraw_base ||
                          local->tm_sec != last_second ||
                          colon_on != last_colon;
@@ -1650,20 +1646,21 @@ main(int argc, char **argv)
                        window, pixmap, gc, font, frame_buffer,
                        width, height, digits, local,
                        battery_level, battery_charging,
-                       current_face);
+                       current_face, animation_progress);
             last_day = local->tm_mday;
             last_month = local->tm_mon;
             last_year = local->tm_year;
             last_night = night_mode;
             last_hour_only = next_hour_only;
             last_face = current_face;
+            last_animation_progress = animation_progress;
         }
         if (redraw_details) {
             draw_live_details(window, pixmap, gc, font, local->tm_sec,
                               colon_on,
                               local->tm_min != 0 && !config_stacked &&
                                   !is_font_face(current_face),
-                              night_mode, current_face);
+                              night_mode, current_face, animation_progress);
             last_second = local->tm_sec;
             last_colon = colon_on;
         }

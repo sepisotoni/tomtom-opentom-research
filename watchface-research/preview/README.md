@@ -19,10 +19,11 @@ does not install or select a persistent face.
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - The three font faces use a centered `HH` over `MM` layout, with an enlarged
   hour-only view at `:00`. A noteworthy live weather summary moves time to the
-  right and shows condition/temperature in the left panel. Ordinary weather
-  leaves the normal centered layout unchanged.
-- `live_watchface.c` is the Nano-X preview application. Tap the screen or send
-  `SIGUSR1` to cycle through the local styles; Numerals Duo is style 5.
+  right and shows condition/temperature in the left panel through a 600 ms
+  transition. Ordinary weather leaves the normal centered layout unchanged.
+- `live_watchface.c` is the Nano-X preview application. Tap the screen to
+  animate the info panel; send `SIGUSR1` to cycle through local styles.
+  Numerals Duo is style 5.
 - `watchface.cfg` starts at Ubuntu and cycles only styles 5–8 (Numerals Duo,
   Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
   to any contiguous range of styles available in the executable. Atlas paths
@@ -31,6 +32,10 @@ does not install or select a persistent face.
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
 Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
+The `info_anim/` module is integrated into this renderer: noteworthy weather
+automatically animates the clock into the info panel, and a screen tap toggles
+the panel without changing the selected face. Face selection remains
+available through Face Studio and `SIGUSR1`.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
@@ -127,7 +132,8 @@ KERNEL=~/opentom-device-install/src/linux-s3c24xx
 
 "$ARM_GCC" -Wall -W -Werror -O2 \
   -I"$NANOX/src/include" -I"$KERNEL/include" \
-  live_watchface.c -L"$NANOX/src/lib" -lnano-X -lm \
+  live_watchface.c info_anim/info_anim.c \
+  -L"$NANOX/src/lib" -lnano-X -lm \
   -o /tmp/watchface-weather
 "$ARM_GCC" -Wall -W -Werror -O2 \
   ../project/src/opentom_skel/bin/tomtom-control.c \
@@ -144,7 +150,8 @@ sentences with an active GPS fix, sends coordinates to the host relay with
 explicit location consent, and stores only the compact display summary in
 device RAM. The relay returns a `no-store` summary; the renderer suppresses
 ordinary conditions and shows noteworthy precipitation, storms, or
-temperature extremes. The current preview draws weather glyphs with native
+temperature extremes using the 600 ms clock-to-info animation. The current
+preview draws weather glyphs with native
 Nano-X shapes; the Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
 references and licensing; selected SVGs and the Apache-2.0 license are kept
