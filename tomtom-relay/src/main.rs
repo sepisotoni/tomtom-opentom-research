@@ -302,20 +302,25 @@ fn route_request(mut request: Request, config: &Config) -> Response {
         if request.method != "POST" {
             return json_error(405, "method_not_allowed");
         }
+        let mut reply;
         if content_type(&request) != Some("application/json") {
-            return json_error(415, "content_type_must_be_json");
+            reply = json_error(415, "content_type_must_be_json");
+        } else if let Some(length) = content_length(&request) {
+            if length == 0 || length > MAX_WEATHER_BYTES {
+                reply = json_error(413, "weather_request_size_invalid");
+            } else {
+                let mut body = vec![0; length];
+                if request.reader.read_exact(&mut body).is_err() {
+                    reply = json_error(400, "incomplete_request_body");
+                } else {
+                    reply = proxy_weather(&body, config);
+                }
+            }
+        } else {
+            reply = json_error(400, "content_length_required");
         }
-        let Some(length) = content_length(&request) else {
-            return json_error(400, "content_length_required");
-        };
-        if length == 0 || length > MAX_WEATHER_BYTES {
-            return json_error(413, "weather_request_size_invalid");
-        }
-        let mut body = vec![0; length];
-        if request.reader.read_exact(&mut body).is_err() {
-            return json_error(400, "incomplete_request_body");
-        }
-        return proxy_weather(&body, config);
+        reply.headers.push(("Cache-Control", "no-store".into()));
+        return reply;
     }
 
     if request.path == "/v1/files" {
@@ -707,7 +712,7 @@ fn call_weather_provider(payload: &str, token: &str, url: &str) -> Result<Vec<u8
     drop(body_file);
 
     let curl_config = format!(
-        "url = \"{}\"\nrequest = \"POST\"\nconnect-timeout = 5\nmax-time = 18\nmax-filesize = {}\nsilent = true\nshow-error = true\nfail = true\nheader = \"Authorization: Bearer {}\"\nheader = \"Content-Type: application/json\"\ndata-binary = \"@{}\"\n",
+        "url = \"{}\"\nrequest = \"POST\"\nconnect-timeout = 5\nmax-time = 18\nmax-filesize = {}\nsilent = true\nshow-error = true\nwrite-out = \"\\\\nTOMTOM_HTTP_STATUS:%{{http_code}}\"\nheader = \"Authorization: Bearer {}\"\nheader = \"Content-Type: application/json\"\ndata-binary = \"@{}\"\n",
         curl_escape(url),
         MAX_RESPONSE_BYTES,
         curl_escape(token),
@@ -730,10 +735,29 @@ fn call_weather_provider(payload: &str, token: &str, url: &str) -> Result<Vec<u8
     if !output.status.success() {
         return Err("weather_provider_unavailable");
     }
-    if output.stdout.len() > MAX_RESPONSE_BYTES as usize {
+    if output.stdout.len() > MAX_RESPONSE_BYTES as usize + 32 {
         return Err("weather_response_too_large");
     }
-    let body = output.stdout;
+    let text = std::str::from_utf8(&output.stdout).map_err(|_| "invalid_weather_response")?;
+    let Some((body_text, status_text)) = text.rsplit_once("\nTOMTOM_HTTP_STATUS:") else {
+        return Err("invalid_weather_response");
+    };
+    let status = status_text
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "invalid_weather_response")?;
+    if status != 200 {
+        return Err(match status {
+            400 | 403 => "weather_request_rejected",
+            401 => "weather_service_unauthorized",
+            429 => "weather_refresh_limited",
+            _ => "weather_provider_unavailable",
+        });
+    }
+    let body = body_text.as_bytes().to_vec();
+    if body.len() > MAX_RESPONSE_BYTES as usize {
+        return Err("weather_response_too_large");
+    }
     let text = std::str::from_utf8(&body).map_err(|_| "invalid_weather_response")?;
     if !text.starts_with('{')
         || !text.ends_with('}')
@@ -903,6 +927,16 @@ mod tests {
     #[test]
     fn escapes_curl_config_strings() {
         assert_eq!(curl_escape("ab\\cd\"ef"), "ab\\\\cd\\\"ef");
+    }
+
+    #[test]
+    fn curl_config_captures_status_without_printing_headers() {
+        let config = format!(
+            "write-out = \"\\\\nTOMTOM_HTTP_STATUS:%{{http_code}}\"\nheader = \"Authorization: Bearer {}\"\n",
+            "private-token"
+        );
+        assert!(config.contains("TOMTOM_HTTP_STATUS:%{http_code}"));
+        assert!(!config.contains("fail = true"));
     }
 
     #[test]
