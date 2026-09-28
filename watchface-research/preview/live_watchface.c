@@ -93,6 +93,7 @@ static int configured_cycle_count;
 static char artwork_dir[160] = "/mnt/sdcard/opentom/preview-gallery";
 static char configured_atlas_paths[6][256];
 static volatile sig_atomic_t face_change_requested;
+static volatile sig_atomic_t info_panel_requested;
 static time_t last_face_selection_poll;
 static time_t last_weather_poll;
 static InfoAnim info_animation;
@@ -378,6 +379,13 @@ request_next_face(int signal_number)
 {
     (void)signal_number;
     face_change_requested = 1;
+}
+
+static void
+request_info_panel(int signal_number)
+{
+    (void)signal_number;
+    info_panel_requested = 1;
 }
 
 static unsigned short
@@ -1504,6 +1512,7 @@ main(int argc, char **argv)
         return 1;
     }
     signal(SIGUSR1, request_next_face);
+    signal(SIGUSR2, request_info_panel);
     GrGetWindowInfo(window, &info);
     width = info.width;
     height = info.height;
@@ -1585,8 +1594,13 @@ main(int argc, char **argv)
             last_weather_poll = current_time;
             weather_changed = read_device_weather(&weather_display);
         }
-        if (event.type == GR_EVENT_TYPE_BUTTON_DOWN &&
-            (last_face_tap == 0 || current_time - last_face_tap >= 1)) {
+        if (info_panel_requested) {
+            info_panel_requested = 0;
+            animation_time = now_milliseconds();
+            ia_tap(&info_animation, animation_time);
+        } else if (event.type == GR_EVENT_TYPE_BUTTON_DOWN &&
+                   (last_face_tap == 0 ||
+                    current_time - last_face_tap >= 1)) {
             animation_time = now_milliseconds();
             ia_tap(&info_animation, animation_time);
             last_face_tap = current_time;

@@ -21,8 +21,9 @@ does not install or select a persistent face.
   hour-only view at `:00`. A screen tap moves time to the right and reveals
   condition/temperature in the left panel through a 600 ms transition.
   Weather updates never open the panel automatically.
-- `live_watchface.c` is the Nano-X preview application. Tap the screen to
-  animate the info panel; send `SIGUSR1` to cycle through local styles.
+- `live_watchface.c` is the Nano-X preview application. Tap the screen or send
+  `SIGUSR2` to animate the info panel; send `SIGUSR1` to cycle through local
+  styles.
   Numerals Duo is style 5.
 - `watchface.cfg` starts at Ubuntu and cycles only styles 5–8 (Numerals Duo,
   Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
@@ -32,12 +33,13 @@ does not install or select a persistent face.
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
 Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
-The `info_anim/` module is integrated into this renderer. Only a screen tap
-opens or closes the info panel while the animation is being evaluated; weather
-updates do not trigger it. The required Google attribution is wrapped inside
-the info panel, and clock seconds are suppressed during the transition to
-avoid drawing over the enlarged time. Face selection remains available
-through Face Studio and `SIGUSR1`.
+The `info_anim/` module is integrated into this renderer. A screen tap or
+`SIGUSR2` opens or closes the info panel while the animation is being
+evaluated; weather updates do not trigger it. The required Google attribution
+is wrapped inside the info panel, and clock seconds are suppressed during the
+transition to avoid drawing over the enlarged time. A test-only power-button
+helper can send `SIGUSR2`; normal startup continues to use the suspend action.
+Face selection remains available through Face Studio and `SIGUSR1`.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
