@@ -26,6 +26,7 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <linux/stat.h>
 #include <linux/workqueue.h>
 #include <asm/io.h>
@@ -55,9 +56,10 @@ int rds_tmc_hack_enabled = 0; // global shared with buspower.c
 #define PFX "gpio: "
 #define PK_DBG PK_DBG_FUNC
 
-#define GPIO_POLL_DELAY (HZ / 5)     /* 5 polls / sec */
+#define GPIO_BUTTON_POLL_HZ 50
+#define GPIO_BUTTON_POLL_DELAY (HZ / GPIO_BUTTON_POLL_HZ)
+#define GPIO_STATUS_POLL_DIVISOR (GPIO_BUTTON_POLL_HZ / 5)
 #define GPIO_PREPIC_TIMEOUT (10 * 5) /* 10 seconds */
-#define GPIO_SHUTDOWN_TIMEOUT (2)    /* 400 ms. Actual event is sent between 400-600 ms*/
 
 /* Forward declarations */
 static void gpio_status_poll( void *data );
@@ -68,11 +70,14 @@ HARDWARE_STATUS gpio_hw_status;
 EXPORT_SYMBOL( gpio_hw_status );
 static unsigned int diskAccessStarted = 0;
 static unsigned int btModeState;
-static int power_button_timer = -1;
 static int power_button_picreset_timer = -1;
 static int ignition_timer = -1;
 static int cycleDockPowerTimer = 0;
 static int diskAccess = 0;
+static int gpio_poll_divider;
+static int button_pressed;
+static unsigned long button_press_started;
+static GPIO_BUTTON_EVENT button_event;
 
 atomic_t low_dc_vcc_event_count = ATOMIC_INIT(0);
 EXPORT_SYMBOL(low_dc_vcc_event_count);
@@ -440,26 +445,6 @@ static void gpio_workqueue(unsigned long data)
 		}
 	}
 
-	// Button pressed?
-	if (IO_GetInput(ON_OFF)) {
-		// Count down timer when button was released
-		if (power_button_timer > 0)
-		{
-			power_button_timer--;
-		}
-		else
-		if (power_button_timer == 0)
-		{
-			// Disable timer to wait for button release
-			power_button_timer = -1;
-			// Send message to application to shut down
-			gpio_hw_status.u8InputStatus |= ONOFF_MASK;
-		}
-	} else {
-		// Enable running timer when button is released (wait 1/5 second)
-		power_button_timer = GPIO_SHUTDOWN_TIMEOUT;
-	}
-
 	// HDD access?
 	if (IO_GetInput(HDD_LED))
 	{
@@ -481,10 +466,38 @@ static void gpio_workqueue(unsigned long data)
 
 static void gpio_status_poll( void *data )
 {
+	unsigned long elapsed;
+
 	wait_event( gpio_wq_busy, (atomic_read( &disable_gpio_wq ) == 0) );
-	gpio_workqueue( (unsigned long) data );
-	if (cycleDockPowerTimer > 0) cycleDockPowerTimer--;
-	schedule_delayed_work( &gpio_workqueue_handle, GPIO_POLL_DELAY );
+	if (IO_GetInput(ON_OFF)) {
+		if (!button_pressed) {
+			button_pressed = 1;
+			button_press_started = jiffies;
+		}
+	} else if (button_pressed) {
+		elapsed = jiffies - button_press_started;
+		if (elapsed / HZ >= 0xffffffffUL / 1000UL)
+			button_event.duration_ms = 0xffffffffUL;
+		else
+			button_event.duration_ms = (UINT32)(
+				(elapsed / HZ) * 1000UL +
+				((elapsed % HZ) * 1000UL) / HZ);
+		button_event.sequence++;
+		button_pressed = 0;
+		gpio_hw_status.u8InputStatus |= ONOFF_MASK;
+		statusChanged = 1;
+		wake_up_interruptible(&gpio_wait);
+	}
+
+	gpio_poll_divider++;
+	if (gpio_poll_divider >= GPIO_STATUS_POLL_DIVISOR) {
+		gpio_poll_divider = 0;
+		gpio_workqueue((unsigned long)data);
+		if (cycleDockPowerTimer > 0)
+			cycleDockPowerTimer--;
+	}
+	schedule_delayed_work(&gpio_workqueue_handle,
+			      GPIO_BUTTON_POLL_DELAY);
 }
 
 void gpio_force_update(void)
@@ -608,6 +621,13 @@ static int gpio_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 		gpio_wq_disable( );
 		ret = copy_to_user((void __user *) arg, &gpio_hw_status, sizeof gpio_hw_status) ? -EFAULT : 0;
 		statusChanged = 0;
+		gpio_wq_enable( );
+		break;
+
+	case IOR_BUTTON_EVENT:
+		gpio_wq_disable( );
+		ret = copy_to_user((void __user *)arg, &button_event,
+				   sizeof button_event) ? -EFAULT : 0;
 		gpio_wq_enable( );
 		break;
 
@@ -846,7 +866,9 @@ static void gpio_hw_init(void)
 	IO_SetInput(DOCK_VIB_SENSE);
 
 	// Stop timers
-	power_button_timer = -1;
+	button_pressed = 0;
+	button_press_started = 0;
+	gpio_poll_divider = 0;
 	ignition_timer = -1;
 	// Clear state from before suspend
 	gpio_hw_status.u8InputStatus = 0;

@@ -1385,7 +1385,6 @@ main(int argc, char **argv)
     int last_night = -1;
     int last_hour_only = -1;
     int last_face = -1;
-    time_t last_face_tap = 0;
     int battery_fd;
     int battery_level = -1;
     int battery_charging = 0;
@@ -1598,12 +1597,9 @@ main(int argc, char **argv)
             info_panel_requested = 0;
             animation_time = now_milliseconds();
             ia_tap(&info_animation, animation_time);
-        } else if (event.type == GR_EVENT_TYPE_BUTTON_DOWN &&
-                   (last_face_tap == 0 ||
-                    current_time - last_face_tap >= 1)) {
+        } else if (event.type == GR_EVENT_TYPE_BUTTON_DOWN) {
             animation_time = now_milliseconds();
             ia_tap(&info_animation, animation_time);
-            last_face_tap = current_time;
         } else if (face_change_requested) {
             face_change_requested = 0;
             advance_face();

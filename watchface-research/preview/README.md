@@ -38,8 +38,9 @@ The `info_anim/` module is integrated into this renderer. A screen tap or
 evaluated; weather updates do not trigger it. The required Google attribution
 is wrapped inside the info panel, and clock seconds are suppressed during the
 transition to avoid drawing over the enlarged time. A test-only power-button
-helper can send `SIGUSR2`; normal startup continues to use the suspend action.
-Face selection remains available through Face Studio and `SIGUSR1`.
+press also toggles the panel through the OS-side duration configuration
+(`<=250 ms` quick action; `251-399 ms` no action). Face selection remains
+available through Face Studio and `SIGUSR1`.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
