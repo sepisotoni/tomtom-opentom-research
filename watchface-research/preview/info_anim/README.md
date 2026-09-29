@@ -34,10 +34,10 @@ of Nano-X rendering or on-device performance.
   trigger animation while the interaction is being evaluated.
 - The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
   from the normal clock to the weather-panel layout. Roboto starts with `HH:MM`
-  side-by-side and animates into the existing stacked time layout when the
-  panel opens; its centered colon blinks in the closed side-by-side state and
-  hides during the transition. Ubuntu and Nunito retain their stacked clock
-  layout.
+  side-by-side and animates into stacked `HH` over `MM` digits on the right
+  half when the panel opens. Its center divider blinks light/dark blue, and the
+  battery icon is hidden on this face. Ubuntu and Nunito retain their stacked
+  clock layout.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
   the normal idle timeout remains one second.
 - `SIGUSR2` toggles the info panel; screen taps cycle the configured face range

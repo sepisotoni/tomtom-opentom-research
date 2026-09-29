@@ -551,9 +551,9 @@ face_rgb(int face, int minute_digit, unsigned int *red,
         *blue = minute_digit ? 253 : 250;
         break;
     case FACE_FONT_ROBOTO:
-        *red = minute_digit ? 67 : 75;
-        *green = minute_digit ? 185 : 225;
-        *blue = minute_digit ? 255 : 250;
+        *red = minute_digit ? 0 : 75;
+        *green = minute_digit ? 0 : 225;
+        *blue = minute_digit ? 139 : 250;
         break;
     case FACE_FONT_UBUNTU:
         *red = minute_digit ? 168 : 255;
@@ -582,9 +582,11 @@ face_color565(int face, int minute_digit, int night_mode)
     unsigned int scale = night_mode ? NIGHT_SCALE : 100;
 
     face_rgb(face, minute_digit, &red, &green, &blue);
-    red = red * scale / 100;
-    green = green * scale / 100;
-    blue = blue * scale / 100;
+    if (face != FACE_FONT_ROBOTO || !minute_digit) {
+        red = red * scale / 100;
+        green = green * scale / 100;
+        blue = blue * scale / 100;
+    }
     return color565(red, green, blue);
 }
 
@@ -800,6 +802,14 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
                 }
             }
         }
+        return;
+    }
+    if (face == FACE_FONT_ROBOTO && animation_progress > 0) {
+        GR_COLOR divider = colon_on ?
+            GR_RGB(173, 216, 230) : GR_RGB(0, 0, 139);
+
+        GrSetGCForeground(gc, divider);
+        GrFillRect(window, gc, 159, 0, 2, LOGICAL_H);
         return;
     }
     /* Keep small seconds markers from covering the enlarged transition time. */
@@ -1273,7 +1283,7 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
         for (i = 0; i < divider_height; ++i)
             logical_pixels[i * LOGICAL_W + 159] = divider;
     }
-    if (face != FACE_NUMERALS_DUO)
+    if (face != FACE_NUMERALS_DUO && face != FACE_FONT_ROBOTO)
         draw_battery(battery_level, battery_charging, night_mode, face);
 
     if (width * LOGICAL_H <= height * LOGICAL_W) {

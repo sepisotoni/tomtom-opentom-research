@@ -61,6 +61,12 @@ test_roboto_side_by_side_layout(void)
           l->to[2].y == l->to[3].y &&
           l->to[0].y < l->to[2].y,
           "Roboto info endpoint is stacked");
+    for (i = 0; i < l->n; ++i) {
+        CHECK(l->to[i].x >= 160,
+              "Roboto info digits remain on the right half");
+        CHECK(l->to[i].x + l->to[i].w <= 320,
+              "Roboto info digits fit inside the screen");
+    }
     CHECK(font->from[0].y < font->from[2].y,
           "Ubuntu and Nunito retain their existing stacked layout");
     for (i = 0; i < l->n; ++i) {
