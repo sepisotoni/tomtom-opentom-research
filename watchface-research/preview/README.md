@@ -25,10 +25,10 @@ does not install or select a persistent face.
   `SIGUSR2` to animate the info panel; send `SIGUSR1` to cycle through local
   styles.
   Numerals Duo is style 5.
-- `watchface.cfg` starts at Ubuntu and cycles only styles 5–8 (Numerals Duo,
-  Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
-  to any contiguous range of styles available in the executable. Atlas paths
-  are relative to `artwork_dir`.
+- `watchface.cfg` starts at Ubuntu and cycles all built-in styles 0–8, including
+  the five legacy faces, Numerals Duo, Roboto, Ubuntu, and Nunito.
+  `cycle_start` and `cycle_count` can limit cycling to any contiguous range of
+  styles available in the executable. Atlas paths are relative to `artwork_dir`.
 
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
