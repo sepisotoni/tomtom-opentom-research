@@ -1247,7 +1247,8 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
         weather_display.available && animation_progress > 0;
     int night_mode = local->tm_hour >= 22 || local->tm_hour < 7;
     int layout_kind = face == FACE_NUMERALS_DUO ? IA_KIND_NUMERALS :
-        (font_face ? IA_KIND_FONT : IA_KIND_GENERIC);
+        (face == FACE_FONT_ROBOTO ? IA_KIND_ROBOTO :
+         (font_face ? IA_KIND_FONT : IA_KIND_GENERIC));
 
     current_night_mode = night_mode;
     panel_alpha = ia_panel_alpha(animation_progress);

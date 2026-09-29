@@ -71,7 +71,12 @@ static const IaLayout layouts[] = {
     /* [6] hour only, font faces: x 46+i*116, y 40, 112x176 */
     { 2,
       {{ 46, 40, 112, 176}, {162, 40, 112, 176}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-      INFO_2 }
+      INFO_2 },
+    /* [7] Roboto side-by-side HH:MM -> the existing stacked info layout */
+    { 4,
+      {{ 20,  76, 55, 88}, { 75,  76, 55, 88},
+       {190,  76, 55, 88}, {245,  76, 55, 88}},
+      FONT_INFO_4 }
 };
 
 const IaLayout *
@@ -80,12 +85,14 @@ ia_layout_for(int kind, int stacked, int hour_only)
     if (hour_only) {
         if (kind == IA_KIND_NUMERALS)
             return &layouts[5];
-        if (kind == IA_KIND_FONT)
+        if (kind == IA_KIND_FONT || kind == IA_KIND_ROBOTO)
             return &layouts[6];
         return &layouts[4];
     }
     if (kind == IA_KIND_NUMERALS)
         return &layouts[2];
+    if (kind == IA_KIND_ROBOTO)
+        return &layouts[7];
     if (kind == IA_KIND_FONT)
         return &layouts[3];
     return stacked ? &layouts[1] : &layouts[0];

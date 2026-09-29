@@ -23,6 +23,7 @@
 #define IA_KIND_GENERIC  0     /* outline/solid/aqua/lavender/sunset faces */
 #define IA_KIND_NUMERALS 1     /* Numerals Duo (always stacked) */
 #define IA_KIND_FONT     2     /* Roboto / Ubuntu / Nunito faces */
+#define IA_KIND_ROBOTO   3     /* Roboto starts side-by-side, opens stacked */
 
 typedef struct {
     short x, y, w, h;
@@ -61,7 +62,7 @@ void ia_update(InfoAnim *a, int noteworthy, unsigned long now_ms);
 void ia_tap(InfoAnim *a, unsigned long now_ms);
 
 /* Layout selection.  stacked only matters for IA_KIND_GENERIC
- * (config_stacked); hour_only = local->tm_min == 0. */
+ * (config_stacked); Roboto starts side-by-side. hour_only = local->tm_min == 0. */
 const IaLayout *ia_layout_for(int kind, int stacked, int hour_only);
 
 /* Per-frame geometry, all from the master progress p (0..IA_ONE). */

@@ -33,7 +33,9 @@ of Nano-X rendering or on-device performance.
 - `live_watchface.c` initializes one `InfoAnim` state; weather updates do not
   trigger animation while the interaction is being evaluated.
 - The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
-  from the normal clock to the weather-panel layout.
+  from the normal clock to the weather-panel layout. Roboto starts with `HH:MM`
+  side-by-side and animates into the existing stacked time layout when the
+  panel opens; Ubuntu and Nunito retain their stacked clock layout.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
   the normal idle timeout remains one second.
 - `SIGUSR2` toggles the info panel; screen taps cycle the configured face range

@@ -23,7 +23,7 @@ test_layout_endpoints(void)
 {
     int kind, stacked, hour, i;
 
-    for (kind = 0; kind <= 2; ++kind)
+    for (kind = 0; kind <= IA_KIND_ROBOTO; ++kind)
         for (stacked = 0; stacked <= 1; ++stacked)
             for (hour = 0; hour <= 1; ++hour) {
                 const IaLayout *l = ia_layout_for(kind, stacked, hour);
@@ -45,11 +45,39 @@ test_layout_endpoints(void)
 }
 
 static void
+test_roboto_side_by_side_layout(void)
+{
+    const IaLayout *l = ia_layout_for(IA_KIND_ROBOTO, 0, 0);
+    const IaLayout *font = ia_layout_for(IA_KIND_FONT, 0, 0);
+    int i;
+
+    CHECK(l->n == 4, "Roboto side-by-side keeps all four digits");
+    CHECK(l->from[0].y == l->from[1].y &&
+          l->from[2].y == l->from[3].y,
+          "Roboto starts as two horizontal digit pairs");
+    CHECK(l->from[0].x + l->from[1].w < l->from[2].x,
+          "Roboto leaves a centered gap for the colon");
+    CHECK(l->to[0].y == l->to[1].y &&
+          l->to[2].y == l->to[3].y &&
+          l->to[0].y < l->to[2].y,
+          "Roboto info endpoint is stacked");
+    CHECK(font->from[0].y < font->from[2].y,
+          "Ubuntu and Nunito retain their existing stacked layout");
+    for (i = 0; i < l->n; ++i) {
+        IaRect r;
+        ia_digit_rect(l, i, 0, &r);
+        CHECK(same(&r, &l->from[i]), "Roboto starts side-by-side at p=0");
+        ia_digit_rect(l, i, IA_ONE, &r);
+        CHECK(same(&r, &l->to[i]), "Roboto settles stacked at p=1");
+    }
+}
+
+static void
 test_monotone_and_no_overshoot(void)
 {
     int kind, stacked, hour, i, p;
 
-    for (kind = 0; kind <= 2; ++kind)
+    for (kind = 0; kind <= IA_KIND_ROBOTO; ++kind)
         for (stacked = 0; stacked <= 1; ++stacked)
             for (hour = 0; hour <= 1; ++hour) {
                 const IaLayout *l = ia_layout_for(kind, stacked, hour);
@@ -251,6 +279,7 @@ main(int argc, char **argv)
     if (argc == 5 && strcmp(argv[1], "dump") == 0)
         return dump(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
     test_layout_endpoints();
+    test_roboto_side_by_side_layout();
     test_monotone_and_no_overshoot();
     test_timeline_endpoints();
     test_open_close_and_reversal();
