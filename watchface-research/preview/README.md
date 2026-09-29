@@ -18,29 +18,27 @@ does not install or select a persistent face.
 - `digit-atlas-roboto.pgm`, `digit-atlas-ubuntu.pgm`, and
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - The three font faces use a centered `HH` over `MM` layout, with an enlarged
-  hour-only view at `:00`. A screen tap moves time to the right and reveals
-  condition/temperature in the left panel through a 600 ms transition.
-  Weather updates never open the panel automatically.
+  hour-only view at `:00`. Weather updates never open the info panel
+  automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
-  `SIGUSR2` to animate the info panel; send `SIGUSR1` to cycle through local
-  styles.
-  Numerals Duo is style 5.
-- `watchface.cfg` starts at Ubuntu and cycles all built-in styles 0–8, including
-  the five legacy faces, Numerals Duo, Roboto, Ubuntu, and Nunito.
+  `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
+  range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.
+- `watchface.cfg` starts at Ubuntu and cycles styles 5–8 (Numerals Duo, Roboto,
+  Ubuntu, and Nunito).
   `cycle_start` and `cycle_count` can limit cycling to any contiguous range of
   styles available in the executable. Atlas paths are relative to `artwork_dir`.
 
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
 Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
-The `info_anim/` module is integrated into this renderer. A screen tap or
-`SIGUSR2` opens or closes the info panel while the animation is being
-evaluated; weather updates do not trigger it. The required Google attribution
-is wrapped inside the info panel, and clock seconds are suppressed during the
-transition to avoid drawing over the enlarged time. A test-only power-button
-press also toggles the panel through the OS-side duration configuration
-(`<=250 ms` quick action; `251-399 ms` no action). Face selection remains
-available through Face Studio and `SIGUSR1`.
+The `info_anim/` module is integrated into this renderer. A screen tap cycles
+the configured faces and closes any open info panel; `SIGUSR2` opens or closes
+the panel. Weather updates do not trigger animation. The required Google
+attribution is wrapped inside the info panel, and clock seconds are suppressed
+during the transition to avoid drawing over the enlarged time. A quick
+power-button press also toggles the panel through the OS-side duration
+configuration (`<=250 ms` quick action; `251-399 ms` no action). Face selection
+is also available through Face Studio and `SIGUSR1`.
 The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service

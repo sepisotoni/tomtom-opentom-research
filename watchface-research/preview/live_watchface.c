@@ -1599,7 +1599,8 @@ main(int argc, char **argv)
             ia_tap(&info_animation, animation_time);
         } else if (event.type == GR_EVENT_TYPE_BUTTON_DOWN) {
             animation_time = now_milliseconds();
-            ia_tap(&info_animation, animation_time);
+            ia_request(&info_animation, 0, animation_time);
+            advance_face();
         } else if (face_change_requested) {
             face_change_requested = 0;
             advance_face();

@@ -36,12 +36,13 @@ of Nano-X rendering or on-device performance.
   from the normal clock to the weather-panel layout.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
   the normal idle timeout remains one second.
-- A screen tap is the only trigger that toggles the info panel. Face selection
-  remains available through Face Studio, the current-face file, and `SIGUSR1`.
+- `SIGUSR2` toggles the info panel; screen taps cycle the configured face range
+  and close an open panel. Face selection is also available through Face Studio
+  and the current-face file.
 - When conditions arrive from the GPS weather relay, the Ubuntu face shows
   the condition icon, temperature, precipitation/alert and required subdued
-  Google attribution after a tap. Attribution is wrapped within the info
-  panel so it cannot intrude into the clock area.
+  Google attribution when the panel is opened. Attribution is wrapped within
+  the info panel so it cannot intrude into the clock area.
 - Weather state remains RAM-only; coordinates and forecasts are not written
   to persistent storage.
 
