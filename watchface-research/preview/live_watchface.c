@@ -551,9 +551,9 @@ face_rgb(int face, int minute_digit, unsigned int *red,
         *blue = minute_digit ? 253 : 250;
         break;
     case FACE_FONT_ROBOTO:
-        *red = minute_digit ? 0 : 75;
-        *green = minute_digit ? 0 : 225;
-        *blue = minute_digit ? 139 : 250;
+        *red = minute_digit ? 67 : 75;
+        *green = minute_digit ? 185 : 225;
+        *blue = minute_digit ? 255 : 250;
         break;
     case FACE_FONT_UBUNTU:
         *red = minute_digit ? 168 : 255;
@@ -582,11 +582,9 @@ face_color565(int face, int minute_digit, int night_mode)
     unsigned int scale = night_mode ? NIGHT_SCALE : 100;
 
     face_rgb(face, minute_digit, &red, &green, &blue);
-    if (face != FACE_FONT_ROBOTO || !minute_digit) {
-        red = red * scale / 100;
-        green = green * scale / 100;
-        blue = blue * scale / 100;
-    }
+    red = red * scale / 100;
+    green = green * scale / 100;
+    blue = blue * scale / 100;
     return color565(red, green, blue);
 }
 

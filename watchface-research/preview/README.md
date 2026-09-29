@@ -20,11 +20,11 @@ does not install or select a persistent face.
 - Ubuntu and Nunito use a centered `HH` over `MM` layout. Roboto (style 6)
   shows `HH:MM` side-by-side while the info panel is closed, then animates into
   stacked `HH` over `MM` digits on the right half as the info panel opens.
-  Roboto's minute digits use `#00008B`; the panel divider blinks between light
-  blue and dark blue, and the battery icon is hidden on this face. The left-side
-  background/content is still pending visual refinement. All three font faces
-  show an enlarged hour-only view at `:00`. Weather updates never open the info
-  panel automatically.
+  Roboto's original blue minute color is retained; the panel divider currently
+  blinks between light blue and dark blue, and the battery icon is hidden on
+  this face. The left-side background/content is still pending visual
+  refinement. All three font faces show an enlarged hour-only view at `:00`.
+  Weather updates never open the info panel automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
   range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.
