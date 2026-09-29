@@ -319,3 +319,11 @@ and do not bridge or expose it to other networks.
 Gallery activation, atomic package replacement/rollback, and installation of
 arbitrary `.ttgallery` packages are not implemented; package export,
 integrity inspection, and replacement planning remain host-side.
+
+## Native Windows build (C++)
+
+A native C++17/Win32 port of Face Studio lives in [`face-studio-native/`](face-studio-native/README.md). It reads and
+writes the same `.ttface`, `.ttgallery` and `.ttproj` formats, applies the same validation, and ships face selection to
+the TomTom over the fixed-command USB service (TCP 18743, `PING` / `STATUS` / `SET_FACE`). The Python Face Studio described
+above stays in the repository as the behavioural reference until parity is verified; the Windows GitHub Actions workflow
+builds the native `.exe` and publishes it as the `TomTomFaceStudio-win-x64` artifact.

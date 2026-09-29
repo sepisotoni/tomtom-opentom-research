@@ -33,3 +33,9 @@ build/
 __pycache__/
 *.pyc
 /tomtom-relay/target/
+
+# native Face Studio build output
+/face-studio-native/build*/
+/build/
+/build-linux/
+/build-mingw/

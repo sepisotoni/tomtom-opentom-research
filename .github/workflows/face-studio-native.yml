@@ -1,0 +1,92 @@
+name: Native Face Studio (Windows x64)
+
+on:
+  push:
+    branches: [main, "native-face-studio*"]
+    paths:
+      - "face-studio-native/**"
+      - "studio/**"
+      - "test_*.py"
+      - ".github/workflows/face-studio-native.yml"
+  pull_request:
+    paths:
+      - "face-studio-native/**"
+      - "studio/**"
+      - "test_*.py"
+      - ".github/workflows/face-studio-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build, test and package (MSVC, x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S face-studio-native -B build -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests (protocol tests use a fake TCP server on loopback)
+        run: build\Release\facestudio_tests.exe
+
+      - name: Report .exe size, dependencies and idle memory
+        shell: pwsh
+        run: |
+          $exe = "build\Release\TomTomFaceStudio.exe"
+          $size = (Get-Item $exe).Length
+          $lines = @("## TomTomFaceStudio.exe footprint", "",
+                     "- File size: $size bytes ($([math]::Round($size / 1KB, 1)) KiB)")
+          try {
+            $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+            $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+                       Where-Object { $_.FullName -like "*Hostx64*x64*" } | Select-Object -First 1
+            $deps = (& $dumpbin.FullName /dependents $exe | Select-String "\.dll" | ForEach-Object { $_.Line.Trim() }) -join ", "
+            $lines += "- Imported DLLs: $deps"
+          } catch { $lines += "- Imported DLLs: (dumpbin unavailable: $_)" }
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $proc.Refresh()
+          if ($proc.HasExited) { throw "Application exited early with code $($proc.ExitCode)" }
+          $ws = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+          $priv = [math]::Round($proc.PrivateMemorySize64 / 1MB, 1)
+          $lines += "- Idle after 8 s (window open, live 1 Hz preview): working set $ws MiB, private bytes $priv MiB"
+          Stop-Process -Id $proc.Id -Force
+          $lines | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: TomTomFaceStudio-win-x64
+          path: build/Release/TomTomFaceStudio.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  reference-parity:
+    name: Python regression tests and C++/Python parity (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: |
+          python -m pip install pillow
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build g++
+      - name: Python Face Studio regression tests (reference behaviour)
+        run: python -m unittest test_studio test_gallery_package test_device_control test_ttface_package test_weather_cache
+      - name: Build native core and tests
+        run: |
+          cmake -S face-studio-native -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DFACESTUDIO_BUILD_APP=OFF
+          cmake --build build-linux
+      - name: Native unit tests
+        run: ./build-linux/facestudio_tests
+      - name: Cross-check native output against the Python reference
+        run: python face-studio-native/tests/parity_check.py build-linux/ttface_tool
