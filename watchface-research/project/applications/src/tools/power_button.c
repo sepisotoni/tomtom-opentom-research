@@ -270,7 +270,6 @@ static int wait_button_duration(int devHWStatus, char *envp[],
 				return -1;
 			}
 			if (event.sequence != last_sequence) {
-				const char *action_name = "none";
 				const char *job = NULL;
 				int action;
 
@@ -280,14 +279,9 @@ static int wait_button_duration(int devHWStatus, char *envp[],
 					config.suspend_min_ms);
 				if (action == POWER_BUTTON_ACTION_QUICK) {
 					job = config.quick_action;
-					action_name = "quick";
 				} else if (action == POWER_BUTTON_ACTION_SUSPEND) {
 					job = config.suspend_action;
-					action_name = "suspend";
 				}
-				fprintf(stderr,
-					"power_button: press=%u ms action=%s\n",
-					event.duration_ms, action_name);
 				if (run_job(job, envp) != 0)
 					return -1;
 			} else {

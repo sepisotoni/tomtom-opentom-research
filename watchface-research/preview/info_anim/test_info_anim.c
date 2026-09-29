@@ -61,14 +61,25 @@ test_roboto_side_by_side_layout(void)
           l->to[2].y == l->to[3].y &&
           l->to[0].y < l->to[2].y,
           "Roboto info endpoint is stacked");
+    CHECK((l->to[0].x + l->to[3].x + l->to[3].w) / 2 == 240,
+          "Roboto expanded digits are centered in the right half");
     for (i = 0; i < l->n; ++i) {
         CHECK(l->to[i].x >= 160,
               "Roboto info digits remain on the right half");
         CHECK(l->to[i].x + l->to[i].w <= 320,
               "Roboto info digits fit inside the screen");
     }
+    l = ia_layout_for(IA_KIND_ROBOTO, 0, 1);
+    CHECK(l->n == 2, "Roboto hour-only info shows two digits");
+    CHECK((l->to[0].x + l->to[1].x + l->to[1].w) / 2 == 240,
+          "Roboto hour-only digits are centered in the right half");
+    for (i = 0; i < l->n; ++i)
+        CHECK(l->to[i].x >= 160 &&
+              l->to[i].x + l->to[i].w <= 320,
+              "Roboto hour-only digits fit in the right half");
     CHECK(font->from[0].y < font->from[2].y,
           "Ubuntu and Nunito retain their existing stacked layout");
+    l = ia_layout_for(IA_KIND_ROBOTO, 0, 0);
     for (i = 0; i < l->n; ++i) {
         IaRect r;
         ia_digit_rect(l, i, 0, &r);
@@ -160,6 +171,12 @@ test_open_close_and_reversal(void)
     ia_init(&a);
     ia_request(&a, 1, 1000);
     t = 1000 + IA_TOTAL_MS + 5;
+    {
+        unsigned long tick;
+
+        for (tick = 1100; tick < t; tick += 100)
+            ia_tick(&a, tick);
+    }
     ia_tick(&a, t);
     CHECK(a.dir == 0, "tick settles a finished animation");
     CHECK(ia_progress(&a, t + 0x7ffffff0UL) == IA_ONE, "stays open after ~25 days");
@@ -219,6 +236,66 @@ test_policy(void)
     ia_update(&a, 1, 500);
     ia_update(&a, 0, 500 + 2 * IA_DWELL_MS);
     CHECK(a.open == 0, "fresh data returns control to auto mode");
+}
+
+static void
+test_stall_clamp_and_colon(void)
+{
+    InfoAnim a;
+    int p_before;
+    int p_after;
+    int p_without_clamp;
+    int previous;
+    int p;
+    int valid;
+
+    CHECK(ia_colon_alpha(0) == 255, "colon visible when closed");
+    CHECK(ia_colon_alpha(200 * IA_ONE / IA_TOTAL_MS) == 0,
+          "colon fades by 200 ms");
+    CHECK(ia_colon_alpha(IA_ONE) == 0, "colon hidden when open");
+    previous = 255;
+    valid = 1;
+    for (p = 0; p <= IA_ONE; ++p) {
+        int alpha = ia_colon_alpha(p);
+        if (alpha > previous || alpha < 0 || alpha > 255)
+            valid = 0;
+        previous = alpha;
+    }
+    CHECK(valid, "colon alpha decreases monotonically");
+
+    ia_init(&a);
+    ia_request(&a, 1, 1000);
+    ia_tick(&a, 1050);
+    p_before = ia_progress(&a, 1050);
+    ia_tick(&a, 1400);
+    p_after = ia_progress(&a, 1400);
+    p_without_clamp = 400 * IA_ONE / IA_TOTAL_MS;
+    CHECK(p_after - p_before <= (IA_MAX_STEP_MS + 1) * IA_ONE /
+                                     IA_TOTAL_MS,
+          "stall advances by at most the clamp interval");
+    CHECK(p_after < p_without_clamp, "stall pauses part of the timeline");
+    CHECK(p_after > p_before, "animation continues after a stall");
+
+    ia_init(&a);
+    ia_request(&a, 1, 5000);
+    ia_tick(&a, 5033);
+    ia_tick(&a, 5066);
+    CHECK(ia_progress(&a, 5066) == 66 * IA_ONE / IA_TOTAL_MS,
+          "normal frame gaps are not clamped");
+
+    ia_init(&a);
+    ia_request(&a, 1, 0);
+    ia_tick(&a, 300);
+    CHECK(ia_active(&a, 300), "stall does not finish the animation early");
+    ia_tick(&a, 330);
+    ia_tick(&a, 430);
+    ia_tick(&a, 530);
+    ia_tick(&a, 630);
+    ia_tick(&a, 730);
+    ia_tick(&a, 830);
+    ia_tick(&a, 930);
+    CHECK(!ia_active(&a, 930) && ia_progress(&a, 930) == IA_ONE,
+          "clamped animation completes after its extended timeline");
 }
 
 static void
@@ -290,6 +367,7 @@ main(int argc, char **argv)
     test_timeline_endpoints();
     test_open_close_and_reversal();
     test_policy();
+    test_stall_clamp_and_colon();
     test_blend();
     report_speed();
     printf("%d checks, %d failures\n", checks, failures);

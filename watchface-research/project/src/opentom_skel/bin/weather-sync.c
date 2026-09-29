@@ -44,6 +44,9 @@ typedef struct {
     int alert;
     int precipitation;
     int noteworthy;
+    int high;
+    int low;
+    char icon_key[40];
 } WeatherSummary;
 
 static int
@@ -216,6 +219,45 @@ enable_raw_gps(void)
 }
 
 static int
+parse_weather_summary(const char *body, WeatherSummary *summary)
+{
+    int parsed;
+    char extra;
+
+    parsed = sscanf(body, "TMW2 %d %d %d %d %d %d %d %39s %c",
+                    &summary->condition, &summary->temperature,
+                    &summary->alert, &summary->precipitation,
+                    &summary->noteworthy, &summary->high, &summary->low,
+                    summary->icon_key, &extra);
+    if (parsed != 8 ||
+        summary->condition < 0 || summary->condition > 6 ||
+        summary->temperature < -100 || summary->temperature > 100 ||
+        summary->alert < 0 || summary->alert > 5 ||
+        summary->precipitation < 0 || summary->precipitation > 100 ||
+        (summary->noteworthy != 0 && summary->noteworthy != 1) ||
+        summary->high < -100 || summary->high > 100 ||
+        summary->low < -100 || summary->low > 100 ||
+        summary->high < summary->low)
+        return 0;
+    if (strcmp(summary->icon_key, "-") == 0)
+        return 1;
+    if (summary->icon_key[0] == '\0' ||
+        strlen(summary->icon_key) >= sizeof(summary->icon_key))
+        return 0;
+    {
+        size_t i;
+
+        for (i = 0; summary->icon_key[i] != '\0'; ++i) {
+            char c = summary->icon_key[i];
+            if (!((c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '_'))
+                return 0;
+        }
+    }
+    return 1;
+}
+
+static int
 fetch_weather(const GpsFix *fix, WeatherSummary *summary)
 {
     char request[512];
@@ -225,8 +267,8 @@ fetch_weather(const GpsFix *fix, WeatherSummary *summary)
     char *header_end;
     int fd;
     int request_length;
-    size_t received = 0;
     int parsed;
+    size_t received = 0;
 
     fd = connect_to(RELAY_HOST, RELAY_PORT, 4);
     if (fd < 0) {
@@ -287,16 +329,7 @@ fetch_weather(const GpsFix *fix, WeatherSummary *summary)
         return WEATHER_FETCH_FAILED;
     }
     body = header_end + 4;
-    parsed = sscanf(body, "TMW1 %d %d %d %d %d",
-                    &summary->condition, &summary->temperature,
-                    &summary->alert, &summary->precipitation,
-                    &summary->noteworthy);
-    if (parsed != 5 ||
-        summary->condition < 0 || summary->condition > 6 ||
-        summary->temperature < -100 || summary->temperature > 100 ||
-        summary->alert < 0 || summary->alert > 5 ||
-        summary->precipitation < 0 || summary->precipitation > 100 ||
-        (summary->noteworthy != 0 && summary->noteworthy != 1)) {
+    if (!parse_weather_summary(body, summary)) {
         fprintf(stderr, "weather-sync: invalid weather summary\n");
         return WEATHER_FETCH_FAILED;
     }
@@ -306,7 +339,7 @@ fetch_weather(const GpsFix *fix, WeatherSummary *summary)
 static int
 set_device_weather(const WeatherSummary *summary)
 {
-    char command[96];
+    char command[160];
     char response[64];
     int fd;
     int length;
@@ -316,10 +349,11 @@ set_device_weather(const WeatherSummary *summary)
     if (fd < 0)
         return 0;
     length = snprintf(command, sizeof(command),
-                      "SET_WEATHER %d %d %d %d %d\n",
+                      "SET_WEATHER %d %d %d %d %d %d %d %s\n",
                       summary->condition, summary->temperature,
                       summary->alert, summary->precipitation,
-                      summary->noteworthy);
+                      summary->noteworthy, summary->high, summary->low,
+                      summary->icon_key);
     if (length < 0 || length >= (int)sizeof(command) ||
         send_all(fd, command, (size_t)length) != 0) {
         close(fd);

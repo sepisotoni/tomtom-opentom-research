@@ -112,7 +112,7 @@ start_power_button &
 while /bin/true
 do
 	sleep 1
-	pidof nano-X || {
+	pidof nano-X >/dev/null 2>&1 || {
 		nice -n -10 nano-X &
 		nanowm &
 		sleep 2

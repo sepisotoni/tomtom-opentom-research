@@ -17,6 +17,7 @@
 #define IA_ONE          1024   /* fixed-point 1.0 */
 #define IA_TOTAL_MS     600    /* full open or close, ms */
 #define IA_DWELL_MS     30000  /* auto-mode: min time between auto changes */
+#define IA_MAX_STEP_MS  100    /* cap animation progress after a stalled frame */
 #define IA_MAX_DIGITS   4
 
 /* Which face family the digits belong to (selects the layout tables). */
@@ -46,6 +47,7 @@ typedef struct {
     int manual_open;
     int have_changed;
     unsigned long last_change;
+    unsigned long last_tick;
 } InfoAnim;
 
 void ia_init(InfoAnim *a);
@@ -69,6 +71,7 @@ const IaLayout *ia_layout_for(int kind, int stacked, int hour_only);
 void ia_digit_rect(const IaLayout *l, int i, int p, IaRect *out);
 int  ia_divider(int p);              /* 0..IA_ONE, fraction of divider drawn */
 int  ia_panel_alpha(int p);          /* 0..255, weather panel opacity */
+int  ia_colon_alpha(int p);          /* colon/seconds fade over first 200 ms */
 void ia_date(int p,
              int *center_dx, int *center_alpha,   /* date at its normal spot */
              int *left_dx, int *left_alpha);      /* date on the info side */

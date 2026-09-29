@@ -56,6 +56,11 @@ coordinates, authorization headers, and upstream URLs are never logged. The
 response includes current conditions, up to 24 hourly periods, and up to 7 daily
 condition summaries, and stays within 4 KiB. No coordinates or Google API key
 are returned.
+The current summary contains a validated Google weather icon key (the path
+component of Google's `iconBaseUri`); each daily summary includes its high and
+low temperature in Celsius. The TomTom USB relay converts those fields into
+its bounded `TMW2` device protocol and proxies the official dark-theme PNG icon
+from Google's fixed static host without caching or writing it to disk.
 The rounded coordinates are still sent to Google, so the explicit consent flag
 is required for each request.
 The response also includes the current location's `timezone` IANA ID and

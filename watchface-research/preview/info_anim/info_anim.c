@@ -21,6 +21,7 @@
 #define DATE_IN_START  320
 #define DATE_IN_DUR    280
 #define DATE_SLIDE_PX  80
+#define COLON_FADE_DUR 200
 
 /* ------------------------------------------------------------------ *
  * Layout tables.  Each row cites where the numbers come from in
@@ -33,8 +34,13 @@
 #define FONT_INFO_4 \
     {{164,   1, 70, 118}, {238,   1, 70, 118}, \
      {164, 120, 70, 118}, {238, 120, 70, 118}}
+#define ROBOTO_INFO_4 \
+    {{168,   1, 70, 118}, {242,   1, 70, 118}, \
+     {168, 120, 70, 118}, {242, 120, 70, 118}}
 #define INFO_2 \
     {{162, 55, 76, 130}, {240, 55, 76, 130}, {0, 0, 0, 0}, {0, 0, 0, 0}}
+#define ROBOTO_INFO_2 \
+    {{168, 61, 70, 118}, {242, 61, 70, 118}, {0, 0, 0, 0}, {0, 0, 0, 0}}
 
 static const IaLayout layouts[] = {
     /* [0] generic, side-by-side: digit_x[] = 8,82,170,244; DIGIT_Y 42;
@@ -76,7 +82,12 @@ static const IaLayout layouts[] = {
     { 4,
       {{ 20,  76, 55, 88}, { 75,  76, 55, 88},
        {190,  76, 55, 88}, {245,  76, 55, 88}},
-      FONT_INFO_4 }
+      ROBOTO_INFO_4 },
+    /* [8] Roboto hour-only view remains centered within the right half */
+    { 2,
+      {{168, 61, 70, 118}, {242, 61, 70, 118},
+       {0, 0, 0, 0}, {0, 0, 0, 0}},
+      ROBOTO_INFO_2 }
 };
 
 const IaLayout *
@@ -85,7 +96,9 @@ ia_layout_for(int kind, int stacked, int hour_only)
     if (hour_only) {
         if (kind == IA_KIND_NUMERALS)
             return &layouts[5];
-        if (kind == IA_KIND_FONT || kind == IA_KIND_ROBOTO)
+        if (kind == IA_KIND_ROBOTO)
+            return &layouts[8];
+        if (kind == IA_KIND_FONT)
             return &layouts[6];
         return &layouts[4];
     }
@@ -163,6 +176,7 @@ ia_init(InfoAnim *a)
     a->manual_open = 0;
     a->have_changed = 0;
     a->last_change = 0;
+    a->last_tick = 0;
 }
 
 int
@@ -194,18 +208,25 @@ ia_request(InfoAnim *a, int open, unsigned long now_ms)
     a->dir = open ? 1 : -1;
     a->open = open;
     a->last_change = now_ms;
+    a->last_tick = now_ms;
     a->have_changed = 1;
 }
 
-/* Collapse a finished animation to "settled" so long uptimes cannot wrap
- * the 32-bit millisecond counter into a fake restart. */
+/* Clamp long loop stalls so a delayed frame does not skip most of the motion. */
 void
 ia_tick(InfoAnim *a, unsigned long now_ms)
 {
+    unsigned long gap;
     int p;
 
-    if (a->dir == 0)
+    if (a->dir == 0) {
+        a->last_tick = now_ms;
         return;
+    }
+    gap = since(now_ms, a->last_tick);
+    a->last_tick = now_ms;
+    if (gap > (unsigned long)IA_MAX_STEP_MS)
+        a->t0 += gap - (unsigned long)IA_MAX_STEP_MS;
     p = ia_progress(a, now_ms);
     if (p == (a->open ? IA_ONE : 0)) {
         a->p0 = p;
@@ -281,6 +302,13 @@ ia_panel_alpha(int p)
 {
     return ease(ia_lut_css_ease,
                 window(master_ms(p), PANEL_START, PANEL_DUR)) * 255 / IA_ONE;
+}
+
+int
+ia_colon_alpha(int p)
+{
+    return 255 - ease(ia_lut_css_ease,
+                      window(master_ms(p), 0, COLON_FADE_DUR)) * 255 / IA_ONE;
 }
 
 void

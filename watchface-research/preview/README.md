@@ -20,11 +20,12 @@ does not install or select a persistent face.
 - Ubuntu and Nunito use a centered `HH` over `MM` layout. Roboto (style 6)
   shows `HH:MM` side-by-side while the info panel is closed, then animates into
   stacked `HH` over `MM` digits on the right half as the info panel opens.
-  Roboto's original blue minute color is retained; the panel divider follows a
-  subtle curve, blinks between light blue and dark blue, and the battery icon
-  is hidden on this face. The left-side background/content is still pending
-  visual refinement. All three font faces show an enlarged hour-only view at
-  `:00`. Weather updates never open the info panel automatically.
+  Roboto's original blue minute color is retained; its open panel has a
+  dark-slate left background, Google's weather PNG icon, current temperature,
+  today's high/low, precipitation, Google attribution, and a straight,
+  subdued center divider. The battery icon is hidden on this face. All three
+  font faces show an enlarged hour-only view at `:00`. Weather updates never
+  open the info panel automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
   range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.
@@ -50,7 +51,10 @@ service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 listens on `192.168.101.115:18743` and is supervised by the device startup
 loop. `PING`, `STATUS`, and `SET_FACE <id>` manage persistent face selection;
 `SET_WEATHER`, `WEATHER_STATUS`, and `CLEAR_WEATHER` manage only the current
-weather summary in RAM. Face selection is written atomically and retained
+weather summary in RAM, including the current temperature, today's high/low,
+and a validated Google icon key. The icon PNG is fetched over USB only when
+the key changes (with a five-minute retry delay after failures), decoded in
+RAM, and never stored on the SD card. Face selection is written atomically and retained
 across renderer restarts and device reboots. The service does not provide a
 shell or general-purpose remote access.
 
@@ -79,7 +83,7 @@ protocol is:
 | `PING` | `OK TOMTOM_CONTROL 1` | Confirms the service is responsive |
 | `STATUS` | `OK FACE <id>` | Reads the persisted built-in face ID |
 | `SET_FACE <id>` | `OK FACE <id>` | Validates `0`–`8` and atomically saves the ID |
-| `SET_WEATHER <condition> <C> <alert> <precip> <noteworthy>` | `OK WEATHER` | Updates the RAM-only summary |
+| `SET_WEATHER <condition> <C> <alert> <precip> <noteworthy> <high> <low> <icon-key>` | `OK WEATHER` | Updates the RAM-only summary |
 | `WEATHER_STATUS` | `OK WEATHER ...` or `OK WEATHER NONE` | Reads the RAM-only summary |
 | `CLEAR_WEATHER` | `OK WEATHER CLEARED` | Clears the RAM-only summary |
 
@@ -95,6 +99,14 @@ the Nano-X backbuffer at the device's native size. A separate scaled output
 buffer is allocated only if the window size differs. Seconds update only their
 small dirty regions; the base face is rebuilt on time-digit, face, battery, or
 date changes.
+
+An opt-in framebuffer experiment can be built with
+`-DWATCHFACE_DIRECT_FB -DWATCHFACE_PROFILE`. It validates the live framebuffer
+mode, reads each completed Nano-X backbuffer into RGB565, and copies it to the
+mapped framebuffer instead of calling `GrCopyArea`. This is a temporary
+presentation-path comparison, not the default: it still uses Nano-X for
+drawing and input, so it does not reduce software rasterization cost. The
+experimental binary exits if the framebuffer is not exactly 320x240 RGB565.
 
 Regenerate the rounded glyph atlas on a desktop with Pillow installed:
 
@@ -165,9 +177,9 @@ or a rate-limit response. The renderer reads that RAM summary every 15
 seconds; this is a local cache refresh, not a weather-provider request. The
 relay returns a `no-store` summary; the renderer suppresses ordinary
 conditions and shows noteworthy precipitation, storms, or temperature
-extremes when the panel is opened by touch. The current preview draws weather
-glyphs with native
-Nano-X shapes; the Material SVGs are references, not runtime assets. The
+extremes when the panel is opened by touch. Roboto uses the official Google
+weather PNG; other preview faces continue to use native Nano-X weather glyphs.
+The Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
 references and licensing; selected SVGs and the Apache-2.0 license are kept
 in `assets/material-weather/`.

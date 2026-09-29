@@ -16,6 +16,7 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_WEATHER_BYTES: usize = 1024;
 const MAX_ASSET_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 8192;
+const MAX_WEATHER_ICON_BYTES: u64 = 32 * 1024;
 const MAX_CLIENTS: usize = 8;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -358,6 +359,29 @@ fn route_request(mut request: Request, config: &Config) -> Response {
         };
         let mut reply = reply;
         reply.headers.push(("Cache-Control", "no-store".into()));
+        return reply;
+    }
+
+    if let Some(icon_key) = request
+        .path
+        .strip_prefix("/v1/weather/icon/")
+        .and_then(|path| path.strip_suffix("_dark.png"))
+    {
+        if request.method != "GET" {
+            return json_error(405, "method_not_allowed");
+        }
+        let mut reply = match fetch_weather_icon(icon_key) {
+            Ok(body) => {
+                let mut reply = response(200, "OK", body);
+                reply.content_type = "image/png";
+                reply
+            }
+            Err(_) => json_error(502, "weather_icon_unavailable"),
+        };
+        reply
+            .headers
+            .push(("Cache-Control", "no-store, max-age=0".into()));
+        reply.headers.push(("Pragma", "no-cache".into()));
         return reply;
     }
 
@@ -942,6 +966,52 @@ fn json_number_field(input: &[u8], name: &str) -> Option<f64> {
     number.is_finite().then_some(number)
 }
 
+fn valid_weather_icon_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn valid_weather_png(image: &[u8]) -> bool {
+    if image.len() < 24
+        || image.len() > MAX_WEATHER_ICON_BYTES as usize
+        || !image.starts_with(b"\x89PNG\r\n\x1a\n")
+        || &image[12..16] != b"IHDR"
+    {
+        return false;
+    }
+    let width = u32::from_be_bytes(image[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(image[20..24].try_into().unwrap());
+    (1..=128).contains(&width) && (1..=128).contains(&height)
+}
+
+fn fetch_weather_icon(icon_key: &str) -> Result<Vec<u8>, &'static str> {
+    if !valid_weather_icon_key(icon_key) {
+        return Err("invalid_weather_icon");
+    }
+    let url = format!("https://maps.gstatic.com/weather/v1/{icon_key}_dark.png");
+    let output = Command::new("curl")
+        .args([
+            "--disable",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "8",
+            "--max-filesize",
+            &MAX_WEATHER_ICON_BYTES.to_string(),
+            &url,
+        ])
+        .output()
+        .map_err(|_| "weather_icon_unavailable")?;
+    if !output.status.success() || !valid_weather_png(&output.stdout) {
+        return Err("weather_icon_unavailable");
+    }
+    Ok(output.stdout)
+}
+
 fn find_bytes(input: &[u8], needle: &[u8]) -> Option<usize> {
     input
         .windows(needle.len())
@@ -1002,6 +1072,7 @@ fn weather_objects(array: &[u8]) -> Vec<&[u8]> {
 fn summarize_weather(body: &[u8]) -> Result<Vec<u8>, &'static str> {
     let current = json_object(body, "current").ok_or("invalid_weather_response")?;
     let hourly = json_array(body, "hourly").ok_or("invalid_weather_response")?;
+    let daily = json_array(body, "daily").ok_or("invalid_weather_response")?;
     let temperature = json_number_field(current, "temperature")
         .ok_or("invalid_weather_response")?
         .round()
@@ -1009,6 +1080,24 @@ fn summarize_weather(body: &[u8]) -> Result<Vec<u8>, &'static str> {
     let current_code = json_string_field(current, "condition")
         .map(|value| condition_code(&value))
         .ok_or("invalid_weather_response")?;
+    let icon_key = json_string_field(current, "icon_key")
+        .filter(|value| valid_weather_icon_key(value))
+        .ok_or("invalid_weather_response")?;
+    let today = weather_objects(daily)
+        .into_iter()
+        .next()
+        .ok_or("invalid_weather_response")?;
+    let high = json_number_field(today, "high")
+        .ok_or("invalid_weather_response")?
+        .round()
+        .clamp(-100.0, 100.0) as i32;
+    let low = json_number_field(today, "low")
+        .ok_or("invalid_weather_response")?
+        .round()
+        .clamp(-100.0, 100.0) as i32;
+    if high < low {
+        return Err("invalid_weather_response");
+    }
 
     let mut maximum_precipitation = 0u8;
     let mut forecast_code = 0u8;
@@ -1060,12 +1149,15 @@ fn summarize_weather(body: &[u8]) -> Result<Vec<u8>, &'static str> {
     };
     let noteworthy = matches!(condition, 4..=6) || maximum_precipitation >= 50 || alert != 0;
     Ok(format!(
-        "TMW1 {} {} {} {} {}\n",
+        "TMW2 {} {} {} {} {} {} {} {}\n",
         condition,
         temperature,
         alert,
         maximum_precipitation,
-        u8::from(noteworthy)
+        u8::from(noteworthy),
+        high,
+        low,
+        icon_key
     )
     .into_bytes())
 }
@@ -1227,14 +1319,20 @@ mod tests {
 
     #[test]
     fn summarizes_normal_conditions_as_hidden() {
-        let body = br#"{"current":{"temperature":20,"condition":"Cloudy"},"hourly":[{"temperature":19,"condition":"Cloudy","precipitation_probability":10},{"temperature":21,"condition":"Partly cloudy","precipitation_probability":20}]}"#;
-        assert_eq!(summarize_weather(body).unwrap(), b"TMW1 2 20 0 20 0\n");
+        let body = br#"{"current":{"temperature":20,"condition":"Cloudy","icon_key":"cloudy"},"hourly":[{"temperature":19,"condition":"Cloudy","precipitation_probability":10},{"temperature":21,"condition":"Partly cloudy","precipitation_probability":20}],"daily":[{"high":24,"low":12}]}"#;
+        assert_eq!(
+            summarize_weather(body).unwrap(),
+            b"TMW2 2 20 0 20 0 24 12 cloudy\n"
+        );
     }
 
     #[test]
     fn summarizes_forecast_rain_and_extreme_temperature() {
-        let body = br#"{"current":{"temperature":34,"condition":"Sunny"},"hourly":[{"temperature":34,"condition":"Sunny","precipitation_probability":10},{"temperature":30,"condition":"Rain showers","precipitation_probability":70}]}"#;
-        assert_eq!(summarize_weather(body).unwrap(), b"TMW1 4 34 3 70 1\n");
+        let body = br#"{"current":{"temperature":34,"condition":"Sunny","icon_key":"sunny"},"hourly":[{"temperature":34,"condition":"Sunny","precipitation_probability":10},{"temperature":30,"condition":"Rain showers","precipitation_probability":70}],"daily":[{"high":36,"low":23}]}"#;
+        assert_eq!(
+            summarize_weather(body).unwrap(),
+            b"TMW2 4 34 3 70 1 36 23 sunny\n"
+        );
     }
 
     #[test]
@@ -1244,6 +1342,14 @@ mod tests {
         )
         .is_err());
         assert!(summarize_weather(br#"{"current":{"temperature":"warm"},"hourly":[{}]}"#).is_err());
+    }
+
+    #[test]
+    fn weather_icon_proxy_rejects_untrusted_paths_and_bad_pngs() {
+        assert!(valid_weather_icon_key("partly_cloudy"));
+        assert!(!valid_weather_icon_key("../secret"));
+        assert!(!valid_weather_icon_key("partly/cloudy"));
+        assert!(!valid_weather_png(b"not a png"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -69,6 +69,27 @@ def _condition(value):
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Invalid condition.")
     return text.strip()[:CONDITION_MAX_CHARS]
+
+
+def _icon_key(value):
+    if not isinstance(value, dict):
+        raise ValueError("Missing weather icon.")
+    uri = value.get("iconBaseUri")
+    if not isinstance(uri, str):
+        raise ValueError("Invalid weather icon.")
+    parsed = urlsplit(uri)
+    prefix = "/weather/v1/"
+    key = parsed.path[len(prefix):] if parsed.path.startswith(prefix) else ""
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "maps.gstatic.com"
+        or parsed.path != f"/weather/v1/{key}"
+        or not re.fullmatch(r"[a-z0-9_]{1,40}", key)
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Invalid weather icon.")
+    return key
 
 
 def _precipitation_probability(value):
@@ -159,6 +180,7 @@ class GoogleWeatherProvider:
             current_weather = {
                 "temperature": _temperature(current["temperature"]),
                 "condition": _condition(current["weatherCondition"]),
+                "icon_key": _icon_key(current["weatherCondition"]),
             }
             hourly_weather = []
             for item in hourly_records[:24]:
@@ -198,6 +220,8 @@ class GoogleWeatherProvider:
                 daily_weather.append({
                     "date": date_text,
                     "condition": daytime_condition,
+                    "high": _temperature(item["maxTemperature"]),
+                    "low": _temperature(item["minTemperature"]),
                 })
 
             fetched_at = datetime.now(timezone.utc)

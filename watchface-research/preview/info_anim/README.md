@@ -11,7 +11,7 @@ Animation timing: 600 ms total (clock 0-500 ms, divider 100-600 ms, panel fade
 |---|---|
 | `info_anim.h/.c` | Geometry and animation state |
 | `info_anim_lut.h` | Generated easing tables |
-| `test_info_anim.c` | Host tests (379 checks) and `dump` mode |
+| `test_info_anim.c` | Host geometry/timing tests and `dump` mode |
 | `preview_filmstrip.py` | Filmstrip using animation output and digit atlases |
 
 ## Build / test on the PC
@@ -35,11 +35,20 @@ of Nano-X rendering or on-device performance.
 - The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
   from the normal clock to the weather-panel layout. Roboto starts with `HH:MM`
   side-by-side and animates into stacked `HH` over `MM` digits on the right
-  half when the panel opens. Its original blue minute color is retained; the
-  curved center divider blinks light/dark blue, and the battery icon is hidden
-  on this face. Ubuntu and Nunito retain their stacked clock layout.
+  half when the panel opens, centered on that half in both the full-time and
+  hour-only layouts. Its original blue minute color is retained; the
+  panel fades in with a dark-slate left background, compact text-only weather
+  details, subdued Google attribution, and a straight, subdued center divider.
+  The battery icon is hidden on this face. Ubuntu and Nunito retain their
+  stacked clock layout. Each animation frame is rendered completely into the
+  backbuffer, including the clock details, before it is copied to the screen;
+  this avoids stale text artifacts when closing the panel.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
-  the normal idle timeout remains one second.
+  frame starts are paced 33 ms apart, compensating for draw time. A delayed
+  frame advances the animation by at most 100 ms, avoiding large visual jumps.
+  Face-file writes and weather polling wait until the transition settles.
+  The colon and seconds fade as they are covered by the moving digits.
+  The normal idle timeout remains one second.
 - `SIGUSR2` toggles the info panel; screen taps cycle the configured face range
   and close an open panel. Face selection is also available through Face Studio
   and the current-face file.
@@ -62,3 +71,6 @@ reversal mid-animation continues from the current position without a jump.
 The module handles short millisecond-counter wrap and backwards clock steps.
 If `hour_only` changes at the minute boundary while an animation is active,
 the selected layout changes on that frame.
+The renderer copies one completed backbuffer frame at a time; intermediate
+details are drawn into that backbuffer rather than painted over the displayed
+frame. Tests cover stall clamping and the colon fade.
