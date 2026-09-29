@@ -56,7 +56,8 @@ or browser-only mockups.
 The preview uses source files and editable/raster glyph atlases; generated
 device executables and screenshots are kept out of this source directory.
 The separate weather companion/relay path now supplies a compact RAM-only
-summary to the preview renderer when a checksum-valid GPS fix is available.
+summary to the preview renderer from a checksum-valid GPS fix, or from the
+configured Tzaneen fallback location after 60 seconds without a fix.
 See `preview/VISUAL_DESIGN_HANDOFF.md` for the icon/animation asset workflow
 and constraints before making visual changes.
 

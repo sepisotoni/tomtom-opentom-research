@@ -19,6 +19,9 @@
 #define CONTROL_PORT 18743
 #define GPS_PIPE "/var/run/gpspipe"
 #define GPS_CONTROL "/dev/gps"
+#define GPS_FALLBACK_CONFIG \
+    "/mnt/sdcard/opentom/etc/weather-fallback-location.cfg"
+#define GPS_FALLBACK_DELAY_SECONDS 60
 #define REQUEST_INTERVAL_SECONDS (60 * 60)
 #define HTTP_BUFFER_SIZE 8192
 #define WEATHER_FETCH_FAILED 0
@@ -29,6 +32,11 @@ typedef struct {
     double latitude;
     double longitude;
 } GpsFix;
+
+typedef struct {
+    GpsFix fix;
+    int enabled;
+} FallbackLocation;
 
 typedef struct {
     int condition;
@@ -153,6 +161,41 @@ parse_rmc(char *line, GpsFix *fix)
         return 0;
     return fix->latitude >= -90.0 && fix->latitude <= 90.0 &&
         fix->longitude >= -180.0 && fix->longitude <= 180.0;
+}
+
+static int
+load_fallback_location(FallbackLocation *location)
+{
+    FILE *file;
+    char line[96];
+    char extra;
+    int valid = 0;
+
+    location->enabled = 0;
+    file = fopen(GPS_FALLBACK_CONFIG, "r");
+    if (file == NULL)
+        return 0;
+    if (fgets(line, sizeof(line), file) != NULL &&
+        sscanf(line, "%lf %lf %c", &location->fix.latitude,
+               &location->fix.longitude, &extra) == 2 &&
+        location->fix.latitude >= -90.0 &&
+        location->fix.latitude <= 90.0 &&
+        location->fix.longitude >= -180.0 &&
+        location->fix.longitude <= 180.0)
+        valid = 1;
+    if (fclose(file) != 0)
+        valid = 0;
+    location->enabled = valid;
+    return valid;
+}
+
+static int
+gps_fallback_due(time_t now, time_t started, time_t last_valid_fix)
+{
+    time_t reference = last_valid_fix != 0 ? last_valid_fix : started;
+
+    return now >= reference &&
+        now - reference >= GPS_FALLBACK_DELAY_SECONDS;
 }
 
 static void
@@ -291,11 +334,49 @@ set_device_weather(const WeatherSummary *summary)
 }
 
 static void
-poll_gps(void)
+refresh_weather(const GpsFix *fix, const char *source, time_t *next_request)
+{
+    WeatherSummary summary;
+    int fetch_result = fetch_weather(fix, &summary);
+
+    if (fetch_result == WEATHER_FETCH_RATE_LIMITED) {
+        fprintf(stderr,
+                "weather-sync: %s refresh limited; waiting one hour\n",
+                source);
+    } else if (fetch_result == WEATHER_FETCH_SUCCEEDED &&
+               set_device_weather(&summary)) {
+        fprintf(stderr, "weather-sync: %s weather updated\n", source);
+    } else {
+        if (fetch_result == WEATHER_FETCH_SUCCEEDED)
+            fprintf(stderr, "weather-sync: device update failed\n");
+        *next_request = time(NULL) + REQUEST_INTERVAL_SECONDS;
+        return;
+    }
+    *next_request = time(NULL) + REQUEST_INTERVAL_SECONDS;
+}
+
+static void
+maybe_request_fallback(time_t now, time_t started, time_t last_valid_fix,
+                       const FallbackLocation *fallback,
+                       int *fallback_requested, time_t *next_request)
+{
+    if (!fallback->enabled || *fallback_requested ||
+        now < *next_request ||
+        !gps_fallback_due(now, started, last_valid_fix))
+        return;
+    refresh_weather(&fallback->fix, "fallback", next_request);
+    *fallback_requested = 1;
+}
+
+static void
+poll_gps(const FallbackLocation *fallback)
 {
     char line[160];
     size_t used = 0;
+    time_t started = time(NULL);
+    time_t last_valid_fix = 0;
     time_t next_request = 0;
+    int fallback_requested = 0;
     int gps_fd = -1;
 
     for (;;) {
@@ -308,6 +389,9 @@ poll_gps(void)
         if (gps_fd < 0)
             gps_fd = open(GPS_PIPE, O_RDONLY | O_NONBLOCK);
         if (gps_fd < 0) {
+            maybe_request_fallback(time(NULL), started, last_valid_fix,
+                                   fallback, &fallback_requested,
+                                   &next_request);
             sleep(5);
             continue;
         }
@@ -321,15 +405,25 @@ poll_gps(void)
                 continue;
             close(gps_fd);
             gps_fd = -1;
+            maybe_request_fallback(time(NULL), started, last_valid_fix,
+                                   fallback, &fallback_requested,
+                                   &next_request);
             continue;
         }
-        if (ready == 0)
+        if (ready == 0) {
+            maybe_request_fallback(time(NULL), started, last_valid_fix,
+                                   fallback, &fallback_requested,
+                                   &next_request);
             continue;
+        }
         count = read(gps_fd, chunk, sizeof(chunk));
         if (count == 0) {
             close(gps_fd);
             gps_fd = -1;
             sleep(2);
+            maybe_request_fallback(time(NULL), started, last_valid_fix,
+                                   fallback, &fallback_requested,
+                                   &next_request);
             continue;
         }
         if (count <= 0) {
@@ -337,6 +431,9 @@ poll_gps(void)
                 close(gps_fd);
                 gps_fd = -1;
             }
+            maybe_request_fallback(time(NULL), started, last_valid_fix,
+                                   fallback, &fallback_requested,
+                                   &next_request);
             continue;
         }
         while (count > 0) {
@@ -353,27 +450,18 @@ poll_gps(void)
                 used += take;
                 if (newline != NULL) {
                     GpsFix fix;
-                    WeatherSummary summary;
                     int valid;
 
                     line[used] = '\0';
                     valid = parse_rmc(line, &fix);
                     used = 0;
-                    if (valid && time(NULL) >= next_request) {
-                        int fetch_result = fetch_weather(&fix, &summary);
+                    if (valid) {
+                        time_t now = time(NULL);
 
-                        if (fetch_result == WEATHER_FETCH_RATE_LIMITED) {
-                            next_request = time(NULL) +
-                                REQUEST_INTERVAL_SECONDS;
-                        } else if (fetch_result == WEATHER_FETCH_SUCCEEDED &&
-                                   set_device_weather(&summary)) {
-                            next_request = time(NULL) + REQUEST_INTERVAL_SECONDS;
-                        } else {
-                            if (fetch_result == WEATHER_FETCH_SUCCEEDED)
-                                fprintf(stderr, "weather-sync: device update failed\n");
-                            next_request = time(NULL) +
-                                REQUEST_INTERVAL_SECONDS;
-                        }
+                        last_valid_fix = now;
+                        fallback_requested = 0;
+                        if (now >= next_request)
+                            refresh_weather(&fix, "GPS", &next_request);
                     }
                 }
             }
@@ -382,21 +470,28 @@ poll_gps(void)
             count -= (ssize_t)(take + 1);
             memmove(chunk, newline + 1, (size_t)count);
         }
+        maybe_request_fallback(time(NULL), started, last_valid_fix,
+                               fallback, &fallback_requested, &next_request);
     }
 }
 
 int
 main(void)
 {
+    FallbackLocation fallback;
     int fd;
 
     signal(SIGPIPE, SIG_IGN);
+    if (!load_fallback_location(&fallback))
+        fprintf(stderr, "weather-sync: fallback location unavailable\n");
+    else
+        fprintf(stderr, "weather-sync: Tzaneen fallback enabled\n");
     fd = connect_to(CONTROL_HOST, CONTROL_PORT, 2);
     if (fd >= 0) {
         send_all(fd, "CLEAR_WEATHER\n", 14);
         close(fd);
     }
     enable_raw_gps();
-    poll_gps();
+    poll_gps(&fallback);
     return 0;
 }

@@ -154,8 +154,12 @@ executables. `start.sh` starts the GPS daemon before `weather-sync`, then
 supervises both companion daemons. The worker accepts only checksum-valid RMC
 sentences with an active GPS fix, sends coordinates to the host relay with
 explicit location consent, and stores only the compact display summary in
-device RAM. It makes at most one relay request per hour, including after an
-error or a rate-limit response. The renderer reads that RAM summary every 15
+device RAM. If no valid fix arrives within 60 seconds, it uses the configured
+fallback in `project/src/opentom_skel/etc/weather-fallback-location.cfg`.
+The current coordinates approximate central Tzaneen; the Aqua Park entrance
+could not be verified from geocoding data. A valid GPS fix takes precedence.
+The worker makes at most one relay request per hour, including after an error
+or a rate-limit response. The renderer reads that RAM summary every 15
 seconds; this is a local cache refresh, not a weather-provider request. The
 relay returns a `no-store` summary; the renderer suppresses ordinary
 conditions and shows noteworthy precipitation, storms, or temperature
