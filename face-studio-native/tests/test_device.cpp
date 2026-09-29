@@ -412,8 +412,11 @@ TEST(device_connection_refused) {
     o.connect_timeout_ms = 500;
     auto t0 = Clock::now();
     DeviceResult r = device_ping(o);
-    CHECK_EQ(static_cast<int>(r.status), static_cast<int>(DeviceStatus::ConnectFailed));
-    CHECK_CONTAINS(r.message, "Could not reach");
+    // Linux reports a refusal at once; Windows retries the SYN for ~2 s first, so a short
+    // connect budget ends as Timeout there. Either way the call is prompt and never succeeds.
+    CHECK(r.status == DeviceStatus::ConnectFailed || r.status == DeviceStatus::Timeout);
+    if (r.status == DeviceStatus::ConnectFailed) CHECK_CONTAINS(r.message, "Could not reach");
+    else CHECK_CONTAINS(r.message, "Timed out");
     CHECK(millis_since(t0) < 1500);
 }
 

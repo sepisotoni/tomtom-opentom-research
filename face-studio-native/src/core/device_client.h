@@ -46,7 +46,7 @@ struct DeviceResult {
 struct DeviceOptions {
     std::string host = kDefaultDeviceHost;
     int port = kDefaultDevicePort;  // overridable for tests only
-    int connect_timeout_ms = 2000;
+    int connect_timeout_ms = 3000;  // Windows takes ~2 s to report a refused connection
     int read_timeout_ms = 3000;  // total budget for send + reply
 };
 

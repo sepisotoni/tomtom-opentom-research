@@ -43,7 +43,7 @@ and nothing else is ever sent.
   bridge, route or expose it to Wi-Fi, other networks or the internet. The UI says so.
   As a guard the app refuses public addresses: only literal IPv4 addresses in
   10/8, 172.16/12, 192.168/16, 169.254/16 and 127/8 are accepted (no host names, so no DNS).
-* Connect timeout 2 s; the whole send + reply exchange is capped at 3 s (a trickled
+* Connect timeout 3 s (Windows needs ~2 s to report a refused connection); the whole send + reply exchange is capped at 3 s (a trickled
   reply cannot extend it). Replies are capped at 64 bytes and must match
   `OK TOMTOM_CONTROL 1` / `OK FACE <single digit 0–8>` / `ERR <A-Z0-9_ ≤32>` exactly —
   leading zeros, signs, CR, control or non-ASCII bytes, trailing data and out-of-range

@@ -173,7 +173,7 @@ DeviceResult exchange(const DeviceOptions& options, const std::string& command, 
     std::string host, error;
     if (!parse_device_host(options.host, host, error)) return make(DeviceStatus::InvalidArgument, error);
     if (options.port < 1 || options.port > 65535) return make(DeviceStatus::InvalidArgument, "Invalid TCP port.");
-    const int connect_ms = options.connect_timeout_ms > 0 ? options.connect_timeout_ms : 2000;
+    const int connect_ms = options.connect_timeout_ms > 0 ? options.connect_timeout_ms : 3000;
     const int read_ms = options.read_timeout_ms > 0 ? options.read_timeout_ms : 3000;
 
     net_init();
@@ -204,7 +204,7 @@ DeviceResult exchange(const DeviceOptions& options, const std::string& command, 
         tv.tv_sec = connect_ms / 1000;
         tv.tv_usec = (connect_ms % 1000) * 1000;
         int ready = ::select(static_cast<int>(sock.h) + 1, nullptr, &writable, &failed, &tv);
-        if (ready == 0) return make(DeviceStatus::Timeout, "Timed out connecting to the TomTom at " + target + ".");
+        if (ready == 0) return make(DeviceStatus::Timeout, "Timed out connecting to the TomTom at " + target + ". Check the USB cable, the network link and that the control service is running.");
         if (ready < 0) return make(DeviceStatus::IoError, "Network error while connecting to the TomTom.");
         int so_error = 0;
 #ifdef _WIN32

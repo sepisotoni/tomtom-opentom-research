@@ -33,7 +33,17 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       - name: Unit tests (protocol tests use a fake TCP server on loopback)
-        run: build\Release\facestudio_tests.exe
+        shell: pwsh
+        run: |
+          build\Release\facestudio_tests.exe 2>&1 | Tee-Object -FilePath test.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            # Surface the failing assertions as one annotation (readable from the checks UI/API without log access).
+            $bad = Get-Content test.log | Where-Object { $_ -match "FAIL" -or $_ -match "parse error" }
+            $msg = ($bad -join "%0A")
+            Write-Host "::error title=facestudio_tests failed (exit $code)::$msg"
+          }
+          exit $code
 
       - name: Report .exe size, dependencies and idle memory
         shell: pwsh
