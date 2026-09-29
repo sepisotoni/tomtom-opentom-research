@@ -19,9 +19,10 @@ does not install or select a persistent face.
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - Ubuntu and Nunito use a centered `HH` over `MM` layout. Roboto (style 6)
   shows `HH:MM` side-by-side while the info panel is closed, then animates into
-  a stacked layout as the panel opens. All three font faces show an enlarged
-  hour-only view at `:00`. Weather updates never open the info panel
-  automatically.
+  a stacked layout as the panel opens. Its centered colon blinks once per
+  second and disappears during the transition to the stacked layout. All three
+  font faces show an enlarged hour-only view at `:00`. Weather updates never
+  open the info panel automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
   range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.

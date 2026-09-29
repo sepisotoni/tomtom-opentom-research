@@ -809,6 +809,7 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
     GrCopyArea(window, gc, 284, 214, 36, 26, pixmap, 284, 214, 0);
     if (show_colon && colon_on) {
         int dot;
+        int roboto_colon = face == FACE_FONT_ROBOTO;
 
         {
             unsigned int red;
@@ -823,7 +824,9 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
             GrSetGCForeground(gc, GR_RGB(red, green, blue));
         }
         for (dot = 0; dot < 2; ++dot) {
-            int center_y = dot == 0 ? 104 : 137;
+            int center_y = roboto_colon ?
+                (dot == 0 ? 112 : 128) :
+                (dot == 0 ? 104 : 137);
             int row;
 
             for (row = -4; row <= 4; ++row) {
@@ -1689,8 +1692,10 @@ main(int argc, char **argv)
         if (redraw_details) {
             draw_live_details(window, pixmap, gc, font, local->tm_sec,
                               colon_on,
-                              local->tm_min != 0 && !config_stacked &&
-                                  !is_font_face(current_face),
+                              local->tm_min != 0 &&
+                                  (current_face == FACE_FONT_ROBOTO ||
+                                   (!config_stacked &&
+                                    !is_font_face(current_face))),
                               night_mode, current_face, animation_progress);
             last_second = local->tm_sec;
             last_colon = colon_on;
