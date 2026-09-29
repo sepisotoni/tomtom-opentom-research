@@ -36,8 +36,8 @@ of Nano-X rendering or on-device performance.
   from the normal clock to the weather-panel layout. Roboto starts with `HH:MM`
   side-by-side and animates into stacked `HH` over `MM` digits on the right
   half when the panel opens. Its original blue minute color is retained; the
-  center divider currently blinks light/dark blue, and the battery icon is
-  hidden on this face. Ubuntu and Nunito retain their stacked clock layout.
+  curved center divider blinks light/dark blue, and the battery icon is hidden
+  on this face. Ubuntu and Nunito retain their stacked clock layout.
 - The event timeout drops to 33 ms only while the 600 ms transition is active;
   the normal idle timeout remains one second.
 - `SIGUSR2` toggles the info panel; screen taps cycle the configured face range

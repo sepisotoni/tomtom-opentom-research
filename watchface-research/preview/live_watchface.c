@@ -752,6 +752,14 @@ put_text(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
     GrText(drawable, gc, x, baseline, (void *)text, -1, GR_TFBASELINE);
 }
 
+static int
+roboto_divider_x(int y)
+{
+    int distance = y * (LOGICAL_H - 1 - y);
+
+    return 159 - 6 * distance / (119 * 119);
+}
+
 static void
 draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
                   GR_FONT_ID detail_font, int second, int colon_on,
@@ -803,11 +811,13 @@ draw_live_details(GR_WINDOW_ID window, GR_WINDOW_ID pixmap, GR_GC_ID gc,
         return;
     }
     if (face == FACE_FONT_ROBOTO && animation_progress > 0) {
-        GR_COLOR divider = colon_on ?
-            GR_RGB(173, 216, 230) : GR_RGB(0, 0, 139);
+        GR_COLOR divider = colon_on ? GR_RGB(173, 216, 230) :
+            GR_RGB(0, 0, 139);
+        int y;
 
         GrSetGCForeground(gc, divider);
-        GrFillRect(window, gc, 159, 0, 2, LOGICAL_H);
+        for (y = 0; y < LOGICAL_H; ++y)
+            GrFillRect(window, gc, roboto_divider_x(y), y, 2, 1);
         return;
     }
     /* Keep small seconds markers from covering the enlarged transition time. */
