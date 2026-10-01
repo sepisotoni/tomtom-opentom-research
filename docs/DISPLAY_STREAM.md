@@ -1,8 +1,9 @@
 # Experimental TomTom display stream
 
-**Status:** receiver/protocol prototype only. The Windows Indirect Display
-Driver (IDD), PC frame producer/transport, and physical-device test are not
-complete. The prototype receiver is not installed or supervised.
+**Status:** receiver/protocol and platform-neutral BGRA-to-RGB565 conversion
+prototype. The Windows Indirect Display Driver (IDD) integration, PC frame
+transport, and physical-device test are not complete. The prototype receiver
+is not installed or supervised.
 
 ## Wire protocol version 1
 
@@ -37,8 +38,11 @@ row padding. Each frame receives a 9-byte acknowledgement:
 | 8 | 1 | Status: `0` accepted, `1` reserved invalid, `2` rate-limited, `3` framebuffer failure |
 
 The initial receiver accepts no other mode, header version, or payload size.
-An IDD frame producer must scale to 320x240 and convert its source surface to
-RGB565 before sending. Wait for the ACK before sending the next frame; the
+The native Studio tree now has a testable BGRA8-to-RGB565-LE converter which
+scales arbitrary bounded source surfaces to 320x240 with nearest-neighbor
+sampling. The IDD still needs to copy its acquired Direct3D surface into a CPU
+readable buffer and hand the converted frame to a bounded transport worker.
+Wait for the ACK before sending the next frame; the
 receiver caps accepted frames at 10 fps and closes on malformed frames or
 excess rate. Each exact receive operation has a two-second deadline to bound
 slow clients.
@@ -59,17 +63,19 @@ or any supervisor. No physical TomTom test has been performed with this
 receiver. Do not install or launch it until there is a coordinated stop/restore
 procedure for the currently supervised renderer and an end-to-end test sender.
 
-Host protocol unit checks run as the native CMake target
-`display_protocol_tests`; build and device-side compile commands are in
+Host protocol and frame-conversion unit checks run as the native CMake targets
+`display_protocol_tests` and `display_frame_converter_tests`; build and
+device-side compile commands are in
 [`DEVELOPMENT.md`](DEVELOPMENT.md). These tests do not exercise framebuffer
 mapping or the live TCP receiver.
 
 ## Remaining path to a true extended monitor
 
-1. Implement IDD mode enumeration, swap-chain surface conversion, and a
-   bounded frame producer on Windows.
-2. Connect the IDD frame producer to this TCP protocol over the direct USB
-   interface; choose and validate the IPC boundary and error/reconnect policy.
+1. Adapt the Microsoft IDD sample to enumerate one 320x240 monitor and consume
+   swap-chain surfaces through the tested converter.
+2. Add a bounded user-mode transport worker and connect it to this TCP protocol
+   over the direct USB interface; choose and validate its configuration and
+   error/reconnect policy.
 3. Build the TomTom receiver for the exact target headers and check its
    reported framebuffer mode before any deployment.
 4. Stop the watchface supervisor in a reversible, documented manner for a

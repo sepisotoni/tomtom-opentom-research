@@ -111,4 +111,16 @@ if(FACESTUDIO_BUILD_TESTS)
       -Wall -Wextra -pedantic -Werror)
   endif()
   add_test(NAME display_protocol_tests COMMAND display_protocol_tests)
+
+  add_executable(display_frame_converter_tests
+    tests/test_frame_converter.cpp
+    src/display/frame_converter.cpp)
+  if(MSVC)
+    target_compile_options(display_frame_converter_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_frame_converter_tests PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME display_frame_converter_tests
+    COMMAND display_frame_converter_tests)
 endif()
