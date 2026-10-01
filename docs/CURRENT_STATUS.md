@@ -113,3 +113,9 @@ card-local layout with the info panel open.
   monitor, not a mirror. This needs a WDK-built/test-signed IDD, a separate
   Windows-to-USB frame transport, and a TomTom framebuffer receiver; none is
   implemented by the current preview `.exe`.
+- On the owner PC, the Microsoft IDD sample compiled its UMDF driver DLL and
+  app and generated a catalog. Its staged x64 INF passed `InfVerif /u` with
+  exit code 0. The source template did not pass manual verification because
+  its `$ARCH$` and `DriverVer` placeholders are intended to be stamped during
+  build. This validates the basic sample toolchain only; no driver has been
+  installed and no TomTom-specific transport/receiver exists yet.

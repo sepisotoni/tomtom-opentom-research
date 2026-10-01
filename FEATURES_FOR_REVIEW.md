@@ -46,6 +46,17 @@ installation/signing and permissions, plus a device-side frame receiver and
 pixel transport. A normal Face Studio `.exe` alone cannot make the TomTom
 appear in Windows Display Settings.
 
+### Toolchain milestone
+
+The owner confirmed Visual Studio 2022, Windows SDK/WDK build 10.0.26100, and
+the `IddCx` headers are installed. Microsoft's `IddSampleDriver.sln` compiled
+the sample UMDF driver DLL and sample app and generated a catalog. The final
+staged x64 INF passed `InfVerif /u` with exit code 0. An earlier automatic INF
+verification attempt failed because MSBuild could not load its x86 verifier
+DLL; manual verification of the staged x64 INF succeeded. This confirms the
+basic IDD toolchain can build/sample-validate, not that the sample is a usable
+TomTom display driver.
+
 A **streamed preview/mirror** captures a PC window or region and sends scaled
 frames to the TomTom. It can be prototyped as an app feature without a Windows
 display driver, but it is not a true second monitor and cannot accept arbitrary
