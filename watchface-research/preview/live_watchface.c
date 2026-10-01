@@ -41,6 +41,19 @@
 #define WEATHER_ICON_MAX_RESPONSE (WEATHER_ICON_MAX_BYTES + 2048)
 #define GOOGLE_MAPS_LOGO_DISPLAY_WIDTH 77
 #define GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT 16
+#define WEATHER_CARD_VIRTUAL_WIDTH 138
+#define WEATHER_CARD_VIRTUAL_HEIGHT 230
+#define WEATHER_CARD_WIDTH_RATIO 431
+#define WEATHER_CARD_HEIGHT_RATIO 958
+#define WEATHER_CARD_LEFT_RATIO 16
+#define WEATHER_CARD_TOP_RATIO 21
+#define WEATHER_CARD_HIDDEN_OFFSET_RATIO 362
+#define WEATHER_CARD_DATE_X 7
+#define WEATHER_CARD_DATE_Y 18
+#define WEATHER_CARD_BATTERY_X 105
+#define WEATHER_CARD_BATTERY_Y 10
+#define WEATHER_CARD_BATTERY_WIDTH 26
+#define WEATHER_CARD_BATTERY_HEIGHT 13
 
 typedef struct {
     int width;
@@ -79,6 +92,23 @@ typedef struct {
     int extremes_available;
     char icon_key[WEATHER_ICON_KEY_SIZE];
 } WeatherDisplay;
+
+typedef struct {
+    int x;
+    int y;
+    int width;
+    int height;
+} WeatherCardLayout;
+
+static void logical_weather_rect(int x, int y, int width, int height,
+                                 unsigned short color, unsigned int alpha);
+static void logical_weather_rounded_rect(int x, int y, int width, int height,
+                                         int radius, unsigned short color,
+                                         unsigned int alpha);
+static void logical_weather_line(int x0, int y0, int x1, int y1,
+                                 unsigned short color, unsigned int alpha,
+                                 int size);
+static const unsigned char *weather_bitmap_glyph(char character);
 
 static GR_IMAGE_ID weather_icon_image;
 static GR_IMAGE_INFO weather_icon_info;
@@ -1171,6 +1201,203 @@ draw_battery(int level, int charging, int night_mode, int face, int x, int y)
     }
 }
 
+static WeatherCardLayout
+weather_card_layout(int progress)
+{
+    WeatherCardLayout layout;
+    int open_x = (LOGICAL_W * WEATHER_CARD_LEFT_RATIO + 500) / 1000;
+    int closed_offset =
+        (WEATHER_CARD_VIRTUAL_WIDTH *
+         WEATHER_CARD_HIDDEN_OFFSET_RATIO + 500) / 1000;
+
+    layout.width = (LOGICAL_W * WEATHER_CARD_WIDTH_RATIO + 500) / 1000;
+    layout.height = (LOGICAL_H * WEATHER_CARD_HEIGHT_RATIO + 500) / 1000;
+    layout.x = -closed_offset +
+        (open_x + closed_offset) * progress / IA_ONE;
+    layout.y = (LOGICAL_H * WEATHER_CARD_TOP_RATIO + 500) / 1000;
+    return layout;
+}
+
+static int
+weather_card_x(const WeatherCardLayout *layout, int x)
+{
+    return layout->x + x * layout->width / WEATHER_CARD_VIRTUAL_WIDTH;
+}
+
+static int
+weather_card_y(const WeatherCardLayout *layout, int y)
+{
+    return layout->y + y * layout->height / WEATHER_CARD_VIRTUAL_HEIGHT;
+}
+
+static int
+weather_card_width(const WeatherCardLayout *layout, int width)
+{
+    return width * layout->width / WEATHER_CARD_VIRTUAL_WIDTH;
+}
+
+static int
+weather_card_height(const WeatherCardLayout *layout, int height)
+{
+    return height * layout->height / WEATHER_CARD_VIRTUAL_HEIGHT;
+}
+
+static int
+weather_card_stroke(const WeatherCardLayout *layout, int size)
+{
+    int scale_x = layout->width * 1000 / WEATHER_CARD_VIRTUAL_WIDTH;
+    int scale_y = layout->height * 1000 / WEATHER_CARD_VIRTUAL_HEIGHT;
+    int scale = scale_x < scale_y ? scale_x : scale_y;
+    int stroke = (size * scale + 500) / 1000;
+
+    return stroke > 0 ? stroke : 1;
+}
+
+static void
+weather_card_rect(const WeatherCardLayout *layout, int x, int y,
+                  int width, int height, unsigned short color,
+                  unsigned int alpha)
+{
+    int left = weather_card_x(layout, x);
+    int top = weather_card_y(layout, y);
+    int right = weather_card_x(layout, x + width);
+    int bottom = weather_card_y(layout, y + height);
+
+    if (right <= left)
+        right = left + 1;
+    if (bottom <= top)
+        bottom = top + 1;
+    logical_weather_rect(left, top, right - left, bottom - top, color, alpha);
+}
+
+static void
+weather_card_rounded_rect(const WeatherCardLayout *layout,
+                          int x, int y, int width, int height, int radius,
+                          unsigned short color, unsigned int alpha)
+{
+    int left = weather_card_x(layout, x);
+    int top = weather_card_y(layout, y);
+    int right = weather_card_x(layout, x + width);
+    int bottom = weather_card_y(layout, y + height);
+    int scaled_radius = weather_card_stroke(layout, radius);
+
+    if (right <= left)
+        right = left + 1;
+    if (bottom <= top)
+        bottom = top + 1;
+    logical_weather_rounded_rect(left, top, right - left, bottom - top,
+                                 scaled_radius, color, alpha);
+}
+
+static void
+weather_card_line(const WeatherCardLayout *layout,
+                  int x0, int y0, int x1, int y1,
+                  unsigned short color, unsigned int alpha, int size)
+{
+    logical_weather_line(weather_card_x(layout, x0),
+                         weather_card_y(layout, y0),
+                         weather_card_x(layout, x1),
+                         weather_card_y(layout, y1),
+                         color, alpha, weather_card_stroke(layout, size));
+}
+
+static void
+weather_card_text(const WeatherCardLayout *layout, const char *text,
+                  int x, int y, int scale, unsigned short color,
+                  unsigned int alpha)
+{
+    const unsigned char *glyph;
+    int row;
+    int column;
+
+    while (*text != '\0') {
+        glyph = weather_bitmap_glyph(*text);
+        if (glyph != NULL) {
+            for (row = 0; row < 7; ++row)
+                for (column = 0; column < 5; ++column)
+                    if (glyph[row] & (1U << (4 - column)))
+                        weather_card_rect(layout,
+                                          x + column * scale,
+                                          y + row * scale,
+                                          scale, scale, color, alpha);
+        } else if (*text == '-') {
+            weather_card_rect(layout, x, y + 3 * scale,
+                              4 * scale, scale, color, alpha);
+        } else if (*text == ':') {
+            weather_card_rect(layout, x + scale, y + 2 * scale,
+                              scale, scale, color, alpha);
+            weather_card_rect(layout, x + scale, y + 5 * scale,
+                              scale, scale, color, alpha);
+        }
+        x += (*text == ' ' || *text == ':' ? 4 : 6) * scale;
+        ++text;
+    }
+}
+
+static void
+weather_card_battery(const WeatherCardLayout *layout, int level,
+                     int charging, int night_mode, int face)
+{
+    unsigned short outline = face_color565(face, 0, night_mode);
+    unsigned short interior = face_background(night_mode);
+    unsigned short fill = color565(88U, 145U, 232U);
+    static const unsigned char bolt[7][5] = {
+        {0, 0, 1, 0, 0}, {0, 0, 1, 0, 0},
+        {0, 1, 1, 0, 0}, {0, 0, 1, 0, 0},
+        {0, 0, 1, 0, 0}, {0, 1, 1, 1, 0},
+        {0, 0, 1, 0, 0}
+    };
+    int fill_width;
+    int row;
+    int column;
+
+    if (level < 0)
+        level = 0;
+    if (level > 100)
+        level = 100;
+    if (night_mode)
+        fill = color565(88U * NIGHT_SCALE / 100,
+                        145U * NIGHT_SCALE / 100,
+                        232U * NIGHT_SCALE / 100);
+    fill_width = 17 * level / 100;
+    weather_card_rect(layout,
+                      WEATHER_CARD_BATTERY_X + 1,
+                      WEATHER_CARD_BATTERY_Y + 1,
+                      WEATHER_CARD_BATTERY_WIDTH - 3,
+                      WEATHER_CARD_BATTERY_HEIGHT - 2,
+                      interior, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X,
+                      WEATHER_CARD_BATTERY_Y,
+                      WEATHER_CARD_BATTERY_WIDTH - 1, 1, outline, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X,
+                      WEATHER_CARD_BATTERY_Y +
+                      WEATHER_CARD_BATTERY_HEIGHT - 1,
+                      WEATHER_CARD_BATTERY_WIDTH - 1, 1, outline, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X,
+                      WEATHER_CARD_BATTERY_Y, 1,
+                      WEATHER_CARD_BATTERY_HEIGHT, outline, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X +
+                      WEATHER_CARD_BATTERY_WIDTH - 2,
+                      WEATHER_CARD_BATTERY_Y, 1,
+                      WEATHER_CARD_BATTERY_HEIGHT, outline, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X + 3,
+                      WEATHER_CARD_BATTERY_Y + 3, fill_width, 7,
+                      fill, 255U);
+    weather_card_rect(layout, WEATHER_CARD_BATTERY_X +
+                      WEATHER_CARD_BATTERY_WIDTH - 1,
+                      WEATHER_CARD_BATTERY_Y + 4, 1, 5,
+                      outline, 255U);
+    if (charging) {
+        for (row = 0; row < 7; ++row)
+            for (column = 0; column < 5; ++column)
+                if (bolt[row][column])
+                    weather_card_rect(layout,
+                                      WEATHER_CARD_BATTERY_X + 9 + column,
+                                      WEATHER_CARD_BATTERY_Y + 3 + row,
+                                      1, 1, outline, 255U);
+    }
+}
+
 static void
 put_text(GR_DRAW_ID drawable, GR_GC_ID gc, GR_FONT_ID font,
          const char *text, int x, int baseline, GR_COLOR color)
@@ -1723,37 +1950,6 @@ draw_weather_bitmap_text(GR_DRAW_ID drawable, GR_GC_ID gc, const char *text,
     }
 }
 
-static void
-logical_weather_text(const char *text, int x, int y, int scale,
-                    unsigned short color, unsigned int alpha)
-{
-    const unsigned char *glyph;
-    int row;
-    int column;
-
-    while (*text != '\0') {
-        glyph = weather_bitmap_glyph(*text);
-        if (glyph != NULL) {
-            for (row = 0; row < 7; ++row)
-                for (column = 0; column < 5; ++column)
-                    if (glyph[row] & (1U << (4 - column)))
-                        logical_weather_rect(
-                            x + column * scale, y + row * scale,
-                            scale, scale, color, alpha);
-        } else if (*text == '-') {
-            logical_weather_rect(x, y + 3 * scale, 4 * scale, scale,
-                                 color, alpha);
-        } else if (*text == ':') {
-            logical_weather_rect(x + scale, y + 2 * scale,
-                                 scale, scale, color, alpha);
-            logical_weather_rect(x + scale, y + 5 * scale,
-                                 scale, scale, color, alpha);
-        }
-        x += (*text == ' ' || *text == ':' ? 4 : 6) * scale;
-        ++text;
-    }
-}
-
 static int
 logical_weather_text_width(const char *text, int scale)
 {
@@ -1767,18 +1963,29 @@ logical_weather_text_width(const char *text, int scale)
 }
 
 static void
-logical_google_maps_logo(int x, int y, unsigned int alpha)
+logical_google_maps_logo(const WeatherCardLayout *layout, int x, int y,
+                         unsigned int alpha)
 {
     int px;
     int py;
+    int scale_x = layout->width * 1000 / WEATHER_CARD_VIRTUAL_WIDTH;
+    int scale_y = layout->height * 1000 / WEATHER_CARD_VIRTUAL_HEIGHT;
+    int scale = scale_x < scale_y ? scale_x : scale_y;
+    int display_width = GOOGLE_MAPS_LOGO_DISPLAY_WIDTH * scale / 1000;
+    int display_height = GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT * scale / 1000;
 
-    for (py = 0; py < GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT; ++py) {
-        int source_y = py * GOOGLE_MAPS_LOGO_HEIGHT /
-            GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT;
+    if (display_width < 1)
+        display_width = 1;
+    if (display_height < 1)
+        display_height = 1;
+    x = weather_card_x(layout, x);
+    y = weather_card_y(layout, y);
+    for (py = 0; py < display_height; ++py) {
+        int source_y = py * GOOGLE_MAPS_LOGO_HEIGHT / display_height;
 
-        for (px = 0; px < GOOGLE_MAPS_LOGO_DISPLAY_WIDTH; ++px) {
+        for (px = 0; px < display_width; ++px) {
             int source_x = px * GOOGLE_MAPS_LOGO_WIDTH /
-                GOOGLE_MAPS_LOGO_DISPLAY_WIDTH;
+                display_width;
             int mask_index = source_y * GOOGLE_MAPS_LOGO_MASK_STRIDE +
                 source_x / 8;
             unsigned char bit =
@@ -1793,13 +2000,13 @@ logical_google_maps_logo(int x, int y, unsigned int alpha)
 }
 
 static void
-logical_weather_degree(int x, int y, unsigned short color,
-                       unsigned int alpha)
+weather_card_degree(const WeatherCardLayout *layout, int x, int y,
+                    unsigned short color, unsigned int alpha)
 {
-    logical_weather_rect(x + 1, y, 3, 1, color, alpha);
-    logical_weather_rect(x, y + 1, 1, 3, color, alpha);
-    logical_weather_rect(x + 4, y + 1, 1, 3, color, alpha);
-    logical_weather_rect(x + 1, y + 4, 3, 1, color, alpha);
+    weather_card_rect(layout, x + 1, y, 3, 1, color, alpha);
+    weather_card_rect(layout, x, y + 1, 1, 3, color, alpha);
+    weather_card_rect(layout, x + 4, y + 1, 1, 3, color, alpha);
+    weather_card_rect(layout, x + 1, y + 4, 3, 1, color, alpha);
 }
 
 static const char *
@@ -1822,8 +2029,9 @@ weather_alert_label(enum WeatherAlert alert)
 }
 
 static void
-logical_notification_text(const char *text, int x, int y,
-                          unsigned short color, unsigned int alpha)
+weather_card_notification_text(const WeatherCardLayout *layout,
+                               const char *text, int x, int y,
+                               unsigned short color, unsigned int alpha)
 {
     char line[19];
     const char *cursor = text;
@@ -1847,7 +2055,7 @@ logical_notification_text(const char *text, int x, int y,
         }
         memcpy(line, cursor, length);
         line[length] = '\0';
-        logical_weather_text(line, x, y + row * 12, 1, color, alpha);
+        weather_card_text(layout, line, x, y + row * 12, 1, color, alpha);
         cursor += length;
         while (*cursor == ' ')
             ++cursor;
@@ -1856,20 +2064,23 @@ logical_notification_text(const char *text, int x, int y,
 }
 
 static void
-logical_notification_icon(int x, int y, unsigned int alpha)
+weather_card_notification_icon(const WeatherCardLayout *layout,
+                               int x, int y, unsigned int alpha)
 {
     unsigned short green = color565(37, 211, 102);
     unsigned short white = color565(245, 255, 250);
 
-    logical_weather_rect(x + 2, y + 2, 18, 14, green, alpha);
-    logical_weather_line(x + 6, y + 14, x + 4, y + 20, green, alpha, 3);
-    logical_weather_rect(x + 6, y + 7, 2, 2, white, alpha);
-    logical_weather_rect(x + 11, y + 7, 2, 2, white, alpha);
-    logical_weather_rect(x + 16, y + 7, 2, 2, white, alpha);
+    weather_card_rect(layout, x + 2, y + 2, 18, 14, green, alpha);
+    weather_card_line(layout, x + 6, y + 14, x + 4, y + 20,
+                      green, alpha, 3);
+    weather_card_rect(layout, x + 6, y + 7, 2, 2, white, alpha);
+    weather_card_rect(layout, x + 11, y + 7, 2, 2, white, alpha);
+    weather_card_rect(layout, x + 16, y + 7, 2, 2, white, alpha);
 }
 
 static void
-draw_font_weather_pixels(const WeatherDisplay *weather, int progress,
+draw_font_weather_pixels(const WeatherCardLayout *layout,
+                         const WeatherDisplay *weather, int progress,
                          const PreviewNotification *notification,
                          unsigned int notification_alpha)
 {
@@ -1884,10 +2095,6 @@ draw_font_weather_pixels(const WeatherDisplay *weather, int progress,
     const char *alert_label;
     int panel_alpha = ia_panel_alpha(progress);
     int elapsed = progress * IA_TOTAL_MS / IA_ONE;
-    int card_x = -50 + 55 * progress / IA_ONE;
-    int card_y = 5;
-    int card_width = 138;
-    int card_height = 230;
     int border_alpha;
     int weather_alpha = panel_alpha *
         (int)preview_notification_weather_alpha(notification_alpha) / 255;
@@ -1903,111 +2110,101 @@ draw_font_weather_pixels(const WeatherDisplay *weather, int progress,
     if (panel_alpha <= 0 && border_alpha <= 0)
         return;
     if (panel_alpha > 0) {
-        logical_weather_rect(card_x, card_y, card_width, card_height,
+        weather_card_rect(layout, 0, 0,
+                          WEATHER_CARD_VIRTUAL_WIDTH,
+                          WEATHER_CARD_VIRTUAL_HEIGHT,
                              ia_blend565(background,
                                          color565(8, 20, 32), panel_alpha),
                              255);
-        logical_weather_line(card_x + 5, card_y,
-                             card_x + card_width - 6, card_y,
-                             border, panel_alpha, 2);
-        logical_weather_line(card_x + 5, card_y + card_height - 1,
-                             card_x + card_width - 6,
-                             card_y + card_height - 1,
-                             border, panel_alpha, 2);
-        logical_weather_line(card_x + 5, card_y,
-                             card_x + 5, card_y + card_height - 1,
-                             border, panel_alpha, 2);
-        logical_weather_line(card_x + card_width - 6, card_y,
-                             card_x + card_width - 6,
-                             card_y + card_height - 1,
-                             border, panel_alpha, 2);
+        weather_card_line(layout, 5, 0,
+                          WEATHER_CARD_VIRTUAL_WIDTH - 6, 0,
+                          border, panel_alpha, 2);
+        weather_card_line(layout, 5, WEATHER_CARD_VIRTUAL_HEIGHT - 1,
+                          WEATHER_CARD_VIRTUAL_WIDTH - 6,
+                          WEATHER_CARD_VIRTUAL_HEIGHT - 1,
+                          border, panel_alpha, 2);
+        weather_card_line(layout, 5, 0, 5,
+                          WEATHER_CARD_VIRTUAL_HEIGHT - 1,
+                          border, panel_alpha, 2);
+        weather_card_line(layout, WEATHER_CARD_VIRTUAL_WIDTH - 6, 0,
+                          WEATHER_CARD_VIRTUAL_WIDTH - 6,
+                          WEATHER_CARD_VIRTUAL_HEIGHT - 1,
+                          border, panel_alpha, 2);
 
         if (message_alpha > 0) {
-            logical_notification_icon(card_x + 12, card_y + 49,
-                                      message_alpha);
-            logical_weather_text("NEW MESSAGE", card_x + 40, card_y + 56,
-                                 1, white, message_alpha);
-            logical_weather_line(card_x + 12, card_y + 79,
-                                 card_x + card_width - 12, card_y + 79,
-                                 border, message_alpha, 1);
-            logical_notification_text(notification->text, card_x + 12,
-                                      card_y + 94, label, message_alpha);
+            weather_card_notification_icon(layout, 12, 49, message_alpha);
+            weather_card_text(layout, "NEW MESSAGE", 40, 56,
+                              1, white, message_alpha);
+            weather_card_line(layout, 12, 79,
+                              WEATHER_CARD_VIRTUAL_WIDTH - 12, 79,
+                              border, message_alpha, 1);
+            weather_card_notification_text(layout, notification->text, 12,
+                                            94, label, message_alpha);
         }
 
         if (weather_alpha > 0 && weather->available) {
             snprintf(value, sizeof(value), "%d", weather->temperature_c);
-            logical_weather_text(value, card_x + 51, card_y + 53,
-                                 2, white, weather_alpha);
-            logical_weather_degree(
-                card_x + 51 + (int)strlen(value) * 12 + 2,
-                card_y + 54, white, weather_alpha);
-            logical_weather_text("C",
-                                 card_x + 51 + (int)strlen(value) * 12 + 9,
-                                 card_y + 53, 1, white, weather_alpha);
-            logical_weather_line(card_x + 23, card_y + 122,
-                                 card_x + 23, card_y + 101, red,
-                                 weather_alpha, 3);
-            logical_weather_line(card_x + 23, card_y + 101,
-                                 card_x + 17, card_y + 108, red,
-                                 weather_alpha, 3);
-            logical_weather_line(card_x + 23, card_y + 101,
-                                 card_x + 29, card_y + 108, red,
-                                 weather_alpha, 3);
-            logical_weather_line(card_x + 91, card_y + 101,
-                                 card_x + 91, card_y + 122, blue,
-                                 weather_alpha, 3);
-            logical_weather_line(card_x + 91, card_y + 122,
-                                 card_x + 85, card_y + 115, blue,
-                                 weather_alpha, 3);
-            logical_weather_line(card_x + 91, card_y + 122,
-                                 card_x + 97, card_y + 115, blue,
-                                 weather_alpha, 3);
+            weather_card_text(layout, value, 51, 53, 2,
+                              white, weather_alpha);
+            weather_card_degree(layout,
+                                51 + (int)strlen(value) * 12 + 2,
+                                54, white, weather_alpha);
+            weather_card_text(layout, "C",
+                              51 + (int)strlen(value) * 12 + 9,
+                              53, 1, white, weather_alpha);
+            weather_card_line(layout, 23, 122, 23, 101, red,
+                              weather_alpha, 3);
+            weather_card_line(layout, 23, 101, 17, 108, red,
+                              weather_alpha, 3);
+            weather_card_line(layout, 23, 101, 29, 108, red,
+                              weather_alpha, 3);
+            weather_card_line(layout, 91, 101, 91, 122, blue,
+                              weather_alpha, 3);
+            weather_card_line(layout, 91, 122, 85, 115, blue,
+                              weather_alpha, 3);
+            weather_card_line(layout, 91, 122, 97, 115, blue,
+                              weather_alpha, 3);
             if (weather->extremes_available) {
                 snprintf(value, sizeof(value), "%d C", weather->high_c);
-                logical_weather_text(value, card_x + 12, card_y + 132,
-                                     1, white, weather_alpha);
+                weather_card_text(layout, value, 12, 132,
+                                  1, white, weather_alpha);
                 snprintf(value, sizeof(value), "%d C", weather->low_c);
-                logical_weather_text(value, card_x + 80, card_y + 132,
-                                     1, white, weather_alpha);
+                weather_card_text(layout, value, 80, 132,
+                                  1, white, weather_alpha);
             } else {
-                logical_weather_text("-- C", card_x + 12, card_y + 132,
-                                     1, label, weather_alpha);
-                logical_weather_text("-- C", card_x + 80, card_y + 132,
-                                     1, label, weather_alpha);
+                weather_card_text(layout, "-- C", 12, 132,
+                                  1, label, weather_alpha);
+                weather_card_text(layout, "-- C", 80, 132,
+                                  1, label, weather_alpha);
             }
 
             alert_label = weather_alert_label(weather->alert);
             for (y = 0; y < 3; ++y) {
                 int inset = y * 7;
-                logical_weather_line(card_x + inset, card_y + 189 + y * 7,
-                                     card_x + 52 + inset,
-                                     card_y + 181 + y * 7,
-                                     color565(10 + y * 3, 36 + y * 13,
-                                              72 + y * 22),
-                                     weather_alpha, 2);
+                weather_card_line(layout, inset, 189 + y * 7,
+                                  52 + inset, 181 + y * 7,
+                                  color565(10 + y * 3, 36 + y * 13,
+                                           72 + y * 22),
+                                  weather_alpha, 2);
             }
             if (alert_label[0] != '\0') {
                 unsigned short alert_border = color565(255, 172, 78);
                 unsigned short alert_fill = color565(64, 39, 18);
 
-                logical_weather_rounded_rect(card_x + 10, card_y + 153,
-                                             82, 18, 7, alert_border,
-                                             weather_alpha);
-                logical_weather_rounded_rect(card_x + 11, card_y + 154,
-                                             80, 16, 6, alert_fill,
-                                             weather_alpha);
-                logical_weather_text(alert_label, card_x + 21,
-                                     card_y + 159, 1,
-                                     color565(255, 214, 158),
-                                     weather_alpha);
+                weather_card_rounded_rect(layout, 10, 153, 82, 18, 7,
+                                          alert_border, weather_alpha);
+                weather_card_rounded_rect(layout, 11, 154, 80, 16, 6,
+                                          alert_fill, weather_alpha);
+                weather_card_text(layout, alert_label, 21, 159, 1,
+                                  color565(255, 214, 158), weather_alpha);
             }
-            logical_google_maps_logo(
-                card_x + 7,
-                card_y + card_height - GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT - 1,
-                weather_alpha);
+            logical_google_maps_logo(layout, 7,
+                                     WEATHER_CARD_VIRTUAL_HEIGHT -
+                                     GOOGLE_MAPS_LOGO_DISPLAY_HEIGHT - 1,
+                                     weather_alpha);
         } else if (weather_alpha > 0 && !weather->available) {
-            logical_weather_text("WEATHER UNAVAILABLE", card_x + 12,
-                                 card_y + 205, 1, muted, weather_alpha);
+            weather_card_text(layout, "WEATHER UNAVAILABLE", 12, 205,
+                              1, muted, weather_alpha);
         }
     }
     if (border_alpha > 0) {
@@ -2020,6 +2217,7 @@ draw_font_weather_pixels(const WeatherDisplay *weather, int progress,
 
 static void
 draw_font_weather_icon_image(GR_DRAW_ID drawable, GR_GC_ID gc,
+                             const WeatherCardLayout *layout,
                              const WeatherDisplay *weather,
                              unsigned int notification_alpha, int progress)
 {
@@ -2027,18 +2225,27 @@ draw_font_weather_icon_image(GR_DRAW_ID drawable, GR_GC_ID gc,
     int weather_alpha =
         panel_alpha * (int)preview_notification_weather_alpha(
             notification_alpha) / 255;
-    int card_x = -50 + 55 * progress / IA_ONE;
+    int icon_x = weather_card_x(layout, 12);
+    int icon_y = weather_card_y(layout, 47);
+    int icon_width = weather_card_width(layout, 30);
+    int icon_height = weather_card_height(layout, 30);
+    int icon_size = icon_width < icon_height ? icon_width : icon_height;
+
+    if (icon_size < 1)
+        icon_size = 1;
 
     if (!weather->available || weather_alpha <= 0)
         return;
     if (progress == IA_ONE && notification_alpha == 0U &&
         weather_icon_image != 0) {
-        GrDrawImagePartToFit(drawable, gc, card_x + 12, 52, 30, 30, 0, 0,
-                             weather_icon_info.width, weather_icon_info.height,
-                             weather_icon_image);
+        GrDrawImagePartToFit(drawable, gc, icon_x, icon_y,
+                             icon_size, icon_size, 0, 0,
+                             weather_icon_info.width,
+                             weather_icon_info.height, weather_icon_image);
     } else {
-        draw_weather_icon(drawable, gc, weather->condition, card_x + 12, 52,
-                          1, current_night_mode, weather_alpha);
+        draw_weather_icon(drawable, gc, weather->condition,
+                          icon_x, icon_y, 1, current_night_mode,
+                          weather_alpha);
     }
 }
 
@@ -2055,6 +2262,7 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
            unsigned int notification_alpha)
 {
     const IaLayout *layout;
+    WeatherCardLayout weather_layout;
     IaRect digit_rect;
     GR_SIZE text_width;
     GR_SIZE text_height;
@@ -2105,8 +2313,10 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
                 logical_pixels[y * LOGICAL_W + x] = time_background;
     }
     layout = ia_layout_for(layout_kind, config_stacked, hour_only);
+    weather_layout = weather_card_layout(animation_progress);
     if (font_face)
-        draw_font_weather_pixels(&weather_display, animation_progress,
+        draw_font_weather_pixels(&weather_layout, &weather_display,
+                                 animation_progress,
                                  notification, notification_alpha);
     for (x = 0; x < layout->n; ++x) {
         ia_digit_rect(layout, x, animation_progress, &digit_rect);
@@ -2125,12 +2335,13 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
     }
     if (font_face) {
         int panel_battery = panel_alpha > 0;
-        int battery_x = panel_battery ?
-            -50 + 55 * animation_progress / IA_ONE + 105 : 282;
-        int battery_y = panel_battery ? 15 : 8;
 
-        draw_battery(battery_level, battery_charging, night_mode, face,
-                     battery_x, battery_y);
+        if (panel_battery)
+            weather_card_battery(&weather_layout, battery_level,
+                                 battery_charging, night_mode, face);
+        else
+            draw_battery(battery_level, battery_charging, night_mode, face,
+                         282, 8);
     } else if (face != FACE_NUMERALS_DUO) {
         draw_battery(battery_level, battery_charging, night_mode, face,
                      282, 8);
@@ -2163,7 +2374,8 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
                MWPF_TRUECOLOR565);
     }
     if (font_has_info)
-        draw_font_weather_icon_image(pixmap, gc, &weather_display,
+        draw_font_weather_icon_image(pixmap, gc, &weather_layout,
+                                     &weather_display,
                                      notification_alpha,
                                      animation_progress);
     if (face == FACE_NUMERALS_DUO && numduo_has_info)
@@ -2205,17 +2417,26 @@ draw_frame(const GlyphAtlas *outline_atlas, const GlyphAtlas *solid_atlas,
             put_text(pixmap, gc, detail_font, date, x, y, color);
     }
     if (left_date_alpha > 0) {
-        int x = offset_x + 12 * scale_num / scale_den +
-            left_date_dx * scale_num / scale_den;
-        int y = offset_y + 31 * scale_num / scale_den;
+        int x;
+        int y;
         GR_COLOR color = fade_color_to_black(date_color, left_date_alpha);
 
-        if (font_face)
+        if (font_face) {
+            x = offset_x + weather_card_x(&weather_layout,
+                                           WEATHER_CARD_DATE_X) *
+                scale_num / scale_den;
+            y = offset_y + weather_card_y(&weather_layout,
+                                           WEATHER_CARD_DATE_Y) *
+                scale_num / scale_den;
             draw_weather_bitmap_text(pixmap, gc, date, x,
-                                     y - 8 * bitmap_scale,
+                                     y,
                                      bitmap_scale, color);
-        else
+        } else {
+            x = offset_x + 12 * scale_num / scale_den +
+                left_date_dx * scale_num / scale_den;
+            y = offset_y + 31 * scale_num / scale_den;
             put_text(pixmap, gc, detail_font, date, x, y, color);
+        }
     }
     if (config_12hour && config_show_ampm) {
         GrGetGCTextSize(gc, ampm, -1, GR_TFBASELINE,

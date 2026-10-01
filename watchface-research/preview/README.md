@@ -33,6 +33,14 @@ does not install or select a persistent face.
   in the time corner while closed and moves into the card when expanded. All
   three font faces show an enlarged hour-only view at `:00`. Weather updates
   never open the info panel automatically.
+- The font-face weather card is a virtual **138x230** layout. Its content is
+  positioned in card-local coordinates and scaled from that coordinate space,
+  not placed independently on the screen. The date follows the card's
+  top-left anchor; the battery owns a reserved upper-right slot, inset seven
+  virtual pixels from the card edge. When the card is fully open, the battery
+  remains 13 pixels clear of the blue time-panel divider. Weather, alert,
+  notification, mountain, and attribution elements use the same local layout
+  mapping, so moving or resizing the card moves/scales its contents together.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
   range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.

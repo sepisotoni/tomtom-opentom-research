@@ -73,6 +73,25 @@ curve, end state, and exact icon bounds. Prefer a short one-shot entrance or
 subtle pulse that returns to a static low-power state. Ordinary weather should
 not animate continuously.
 
+### Card-local layout policy
+
+The font-face info/weather card is a virtual **138x230** coordinate surface.
+Its current screen origin and size come from `WeatherCardLayout` in
+`live_watchface.c`; card children are drawn in local coordinates and passed
+through the same x/y ratio mapping. Do not hard-code card child positions
+against the 320x240 screen or give a child a separate animation trajectory.
+This makes the date, battery, weather icon, temperature, high/low, alert,
+notification, decoration, and attribution move with the same card and retain
+their relative placement when its dimensions change.
+
+Assign bounded local slots/anchors for new content before drawing it. The
+battery occupies the upper-right anchor at virtual `(105, 10)` with a
+26x13-pixel footprint; it stays inset from the card edge and 13 pixels clear
+of the blue time-panel divider when the card is fully open. Keep the date at
+the card's top-left local anchor. Preserve readability and provider/logo aspect
+ratio when scaling. The fixed 320x240 device remains the reference size; inspect
+the real device output after changing the policy.
+
 Implementation guidance:
 
 1. Represent time, phase, position, and scale with integer/fixed-point state.

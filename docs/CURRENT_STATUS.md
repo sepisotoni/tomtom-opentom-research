@@ -8,6 +8,9 @@ state. Recheck hardware before deployment.
 
 - Source of truth: `watchface-research/preview/live_watchface.c` plus
   `info_anim/info_anim.c` and the preview assets.
+- Font-face info card now uses a virtual 138x230 local coordinate surface;
+  date, battery, and content elements move/scale through its common layout
+  mapping. The battery has a reserved upper-right slot relative to the card.
 - Face IDs `5`–`8` are Numerals Duo, Roboto, Ubuntu, and Nunito.
 - The font-face info card has a drawn date, battery at upper right, weather
   icon beside temperature, optional high/low and severity badge, and official
@@ -15,8 +18,9 @@ state. Recheck hardware before deployment.
   attribution.
 - Placeholder notification packets replace (not overlay) weather content in
   the card. They fade during the final 1.5 seconds and are held only in RAM.
-- The last preview ARM build used `-DWATCHFACE_DIRECT_FB`; it still renders
-  with Nano-X and copies the completed RGB565 backbuffer to the framebuffer.
+- The currently installed preview ARM build uses `-DWATCHFACE_DIRECT_FB`; it
+  still renders with Nano-X and copies the completed RGB565 backbuffer to the
+  framebuffer.
 - Weather summaries and icons are transient. The relay/service flow requires
   explicit location consent and must not persist location or provider data.
 
@@ -65,9 +69,30 @@ remains on the device. The temporary host USB address is not persistent; if the
 device becomes unreachable again, rediscover the USB interface and route rather
 than using the possibly mismatched systemd network profile.
 
+## Dynamic card preview (2026-10-01)
+
+- Deployed the card-local layout build to the gallery renderer and restarted it.
+- Face 8 was selected; the renderer remained on direct 320x240 RGB565 output.
+- Populated the RAM-only weather display with a visual sample (rain, 12°C,
+  placeholders for extremes) because `WEATHER_STATUS` was `NONE`; this is not
+  live weather. The state is volatile and can be cleared with `CLEAR_WEATHER`.
+- Device capture:
+  `~/Downloads/TomTom-dynamic-info-card-sample-20261001T1412.png`.
+- The immediately pre-change 62,735-byte renderer was archived on the host as
+  `~/TomTomBackups/20261001-device-cleanup/watchface.new.before-dynamic-card-20261001T1412`;
+  the existing compact-logo rollback remains on the TomTom.
+- Follow-up verification capture:
+  `~/Downloads/TomTom-dynamic-info-card-reopened-20261001T1425.png`.
+  The 14:22 and 14:23 captures were made while the info panel was closed; they
+  were not evidence of a renderer regression. Reopening it with `SIGUSR2`
+  restored the visible date, battery, weather icon/data, and card-local layout.
+  The card is left open on the device for visual review.
+- Preview weather remains fabricated, volatile sample data, not live weather.
+
 ## Recent local validation
 
 The preview icon-converter suite passed four tests; animation tests passed 491
 checks; the notification parser/timing test passed; the direct-framebuffer ARM
-renderer build completed. These results apply to that local build/source state
-and do not replace a fresh on-device verification.
+renderer build completed. No Python test suites were run for the dynamic-card
+change, per preference. The latest on-device capture above verifies the
+card-local layout with the info panel open.

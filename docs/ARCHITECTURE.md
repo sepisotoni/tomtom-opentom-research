@@ -43,6 +43,14 @@ The gallery uses:
 - `notification_event.h` for notification parsing, expiry, and fade timing.
 - PGM digit atlases and generated RGB565/mask headers for artwork.
 
+The font-face information card has its own 138x230 virtual coordinate surface.
+`WeatherCardLayout` maps local child coordinates onto the card's animated
+origin and ratio-derived dimensions. The date and battery use named card
+anchors; weather, notification, alert, decoration, icon, and attribution
+drawing use the same transform. New card contents should claim a bounded local
+slot and must not draw at screen-global positions, so the entire card can move
+or resize as one layout.
+
 ### Face Studio and `.ttface`
 
 Face Studio edits and validates declarative projects on the host. Its package
