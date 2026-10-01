@@ -126,5 +126,12 @@ card-local layout with the info panel open.
   a BGRA8-to-RGB565 converter and a bounded USB-only TCP sender worker; it
   keeps only the latest pending frame, limits delivery to 10 fps, waits for
   validated ACKs, and sleeps/disconnects while idle. Host tests cover the
-  protocol, conversion, and worker lifecycle. The sender is not yet wired to
-  an IDD, and the WDK driver and physical end-to-end test remain outstanding.
+  protocol, conversion, and worker lifecycle. The WDK-specific IDD source now
+  wires its active swap-chain frames to that sender; the WDK build and physical
+  end-to-end test remain outstanding.
+- An experimental WDK-specific IDD project now advertises one 320x240 mode,
+  rate-limits D3D staging/readback and conversion to 10 fps, and feeds the
+  bounded sender only while IddCx has assigned an active swap chain. A
+  temporary software-device create/close utility is included. Neither project
+  has been built with the Windows WDK or installed; local MinGW cannot validate
+  IddCx/INF APIs.

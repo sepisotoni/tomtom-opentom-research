@@ -77,6 +77,11 @@ if(WIN32 AND FACESTUDIO_BUILD_APP)
   if(MSVC)
     target_link_options(TomTomFaceStudio PRIVATE /MANIFEST:NO)  # manifest is embedded via app.rc
   endif()
+
+  if(MSVC)
+    add_executable(TomTomDisplayControl windows-idd/TomTomDisplayControl.cpp)
+    target_link_libraries(TomTomDisplayControl PRIVATE cfgmgr32)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------

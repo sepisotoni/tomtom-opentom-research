@@ -1,0 +1,63 @@
+;
+; Experimental TomTom Indirect Display Driver package.
+; Do not install until built, signed, and reviewed on a test system.
+;
+[Version]
+Signature="$Windows NT$"
+Class=Display
+ClassGuid={4D36E968-E325-11CE-BFC1-08002BE10318}
+Provider=%ProviderName%
+CatalogFile=TomTomIdd.cat
+DriverVer=10/01/2026,1.0.0.0
+PnpLockDown=1
+
+[Manufacturer]
+%ProviderName%=Models,NTamd64.10.0...22000
+
+[Models.NTamd64.10.0...22000]
+%DeviceName%=Device_Install,Root\TomTomIndirectDisplay
+
+[SourceDisksNames]
+1=%DiskName%
+
+[SourceDisksFiles]
+TomTomIdd.dll=1
+
+[DestinationDirs]
+DriverCopy=12,UMDF
+
+[Device_Install.NT]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT
+CopyFiles=DriverCopy
+
+[Device_Install.NT.HW]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.HW
+AddReg=DeviceSettings
+
+[DeviceSettings]
+HKR,,"UpperFilters",0x00010000,"IndirectKmd"
+HKR,"WUDF","DeviceGroupId",0x00000000,"TomTomIndirectDisplayGroup"
+
+[Device_Install.NT.Services]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.Services
+
+[Device_Install.NT.Wdf]
+UmdfService=TomTomIdd,TomTomIdd_Install
+UmdfServiceOrder=TomTomIdd
+UmdfKernelModeClientPolicy=AllowKernelModeClients
+
+[TomTomIdd_Install]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%12%\UMDF\TomTomIdd.dll
+UmdfExtensions=IddCx0102
+
+[DriverCopy]
+TomTomIdd.dll
+
+[Strings]
+ProviderName="TomTom Face Studio"
+DeviceName="TomTom 320x240 Indirect Display"
+DiskName="TomTom Indirect Display Driver"

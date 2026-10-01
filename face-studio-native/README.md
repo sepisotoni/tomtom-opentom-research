@@ -92,7 +92,10 @@ connection refused, connect timeout, exact bytes on the wire for `PING` / `STATU
 `SET_FACE 0..8`, and that invalid IDs or non-USB hosts never open a connection.
 The `display_protocol_tests` target validates the fixed-size RGB565 frame header
 and ACK encoding shared with the experimental TomTom receiver. It does not
-exercise a live framebuffer or Windows display driver.
+exercise a live framebuffer or Windows display driver. The experimental WDK
+IDD project and its Windows-only validation steps are documented in
+[`windows-idd/README.md`](windows-idd/README.md); it has not yet been built with
+the WDK and is not part of the native Studio installer or executable.
 
 ## Footprint
 

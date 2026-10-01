@@ -93,8 +93,11 @@ only fixed 320x240 RGB565 little-endian frames from the USB subnet, validate
 the framebuffer mode, and cap delivery at 10 fps. The native Studio tree now
 also contains a tested BGRA-to-RGB565 converter and a bounded USB-only sender
 worker with one latest-frame slot, ACK validation, and idle disconnect. These
-components are not wired to an IDD, installed, or started automatically; the
-Windows IDD frame source and its WDK build are still unimplemented.
+components are now wired in an experimental WDK-specific IDD source project
+with a single 320x240 mode, rate-limited Direct3D staging/capture, and a
+temporary software-device create/close utility. The WDK project has not yet
+been compiled or run on Windows; no driver is installed or started
+automatically, and there has been no physical end-to-end test.
 
 The fixed 320x240 panel is the initial mode. Uncompressed RGB565 is 153,600
 bytes per frame (about 1.47 MiB); at 10 frames/second that is about 12.3
