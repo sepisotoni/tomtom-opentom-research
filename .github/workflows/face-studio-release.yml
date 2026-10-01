@@ -76,7 +76,7 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       - name: Unit tests
-        run: build\Release\facestudio_tests.exe
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package
         shell: pwsh

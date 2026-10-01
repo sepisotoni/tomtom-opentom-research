@@ -32,16 +32,15 @@ jobs:
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
-      - name: Unit tests (protocol tests use a fake TCP server on loopback)
+      - name: Unit tests (core + display protocol/converter/transport; fake loopback servers)
         shell: pwsh
         run: |
-          build\Release\facestudio_tests.exe 2>&1 | Tee-Object -FilePath test.log
+          ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object -FilePath test.log
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            # Surface the failing assertions as one annotation (readable from the checks UI/API without log access).
-            $bad = Get-Content test.log | Where-Object { $_ -match "FAIL" -or $_ -match "parse error" }
-            $msg = ($bad -join "%0A")
-            Write-Host "::error title=facestudio_tests failed (exit $code)::$msg"
+            # Surface failing assertions as one annotation (readable from the checks UI/API without log access).
+            $bad = Get-Content test.log | Where-Object { $_ -match "FAIL" -or $_ -match "parse error" -or $_ -match "Failed" }
+            Write-Host "::error title=tests failed (exit $code)::$($bad -join '%0A')"
           }
           exit $code
 
