@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TomTomFaceStudio VERSION 1.0.0 LANGUAGES CXX)
+project(TomTomFaceStudio VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -96,4 +96,19 @@ if(FACESTUDIO_BUILD_TESTS)
   add_executable(ttface_tool tests/ttface_tool.cpp)
   target_link_libraries(ttface_tool PRIVATE facestudio_core)
   facestudio_shrink(ttface_tool)
+
+  add_executable(display_protocol_tests
+    ../watchface-research/project/tests/test_display_protocol.c
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  set_target_properties(display_protocol_tests PROPERTIES
+    C_STANDARD 90
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF)
+  if(MSVC)
+    target_compile_options(display_protocol_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_protocol_tests PRIVATE
+      -Wall -Wextra -pedantic -Werror)
+  endif()
+  add_test(NAME display_protocol_tests COMMAND display_protocol_tests)
 endif()

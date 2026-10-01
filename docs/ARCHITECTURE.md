@@ -12,6 +12,7 @@ TomTom ONE v6 ── Nano-X gallery renderer / packaged runtime (separate apps)
       ├── USB TCP 18743: fixed-command control + RAM weather summary
       ├── USB UDP 45872: short-lived notification placeholder events
       ├── USB TCP 18744: weather PNG icon proxy from host relay
+      ├── USB TCP 18745: experimental bounded RGB565 display-frame receiver
       └── optional GPS → weather-sync → host relay → Render → Google Weather API
 ```
 
@@ -88,6 +89,25 @@ The request/response details are documented in
 [`watchface-research/preview/README.md`](../watchface-research/preview/README.md).
 This is a narrow application protocol, not a shell. The daemon is unauthenticated
 and must remain on USB.
+
+### Experimental display frames — TCP 18745
+
+`watchface-research/project/src/opentom_skel/bin/tomtom-display-receiver.c`
+is a standalone, not-yet-deployed framebuffer receiver. It accepts a fixed-size
+320x240 RGB565 little-endian frame protocol from the USB subnet, checks the
+framebuffer mode before mapping `/dev/fb0`, and rate-limits frames to 10 per
+second. It uses a separate port from `tomtom-control`; do not add display data
+to that command protocol.
+
+The receiver takes over the physical framebuffer and must not run concurrently
+with the gallery renderer. It is not started or supervised by `start.sh`, is
+not an installed feature, and has not yet been tested on the device. The PC
+side still needs an IDD frame source and bounded transport implementation.
+Protocol definitions and host tests are in
+`tomtom-display-protocol.[ch]` and
+`watchface-research/project/tests/test_display_protocol.c`.
+The exact field layout and receiver safety limitations are documented in
+[`DISPLAY_STREAM.md`](DISPLAY_STREAM.md).
 
 ### Placeholder notification — UDP 45872
 

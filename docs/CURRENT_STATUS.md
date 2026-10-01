@@ -119,3 +119,9 @@ card-local layout with the info panel open.
   its `$ARCH$` and `DriverVer` placeholders are intended to be stamped during
   build. This validates the basic sample toolchain only; no driver has been
   installed and no TomTom-specific transport/receiver exists yet.
+- An experimental standalone C89 receiver and fixed 320x240 RGB565 frame
+  protocol are now implemented and ARM-buildable. The receiver is not
+  installed or supervised by device startup, and must not run alongside the
+  gallery renderer because both use `/dev/fb0`. Host protocol tests are
+  available through `display_protocol_tests`; the Windows IDD frame source and
+  transport are still missing.

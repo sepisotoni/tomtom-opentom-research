@@ -90,6 +90,9 @@ The device tests cover: reply parsing, every invalid face ID, malformed / oversi
 trailing / non-ASCII replies, early close, read timeout, trickle (slowloris) timeout,
 connection refused, connect timeout, exact bytes on the wire for `PING` / `STATUS` /
 `SET_FACE 0..8`, and that invalid IDs or non-USB hosts never open a connection.
+The `display_protocol_tests` target validates the fixed-size RGB565 frame header
+and ACK encoding shared with the experimental TomTom receiver. It does not
+exercise a live framebuffer or Windows display driver.
 
 ## Footprint
 

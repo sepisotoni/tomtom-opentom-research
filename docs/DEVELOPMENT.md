@@ -107,6 +107,29 @@ The matching daemon sources are:
 Compile from a working directory where the relative source paths above exist
 (or use repository-root absolute paths).
 
+### Experimental display receiver
+
+The C89 frame protocol can be checked on the host through the native Studio
+CMake test target (`display_protocol_tests`). Build the standalone receiver
+for the TomTom only with the matching legacy ARM compiler and kernel headers:
+
+```sh
+ARM_GCC=/path/to/OpenTom/gcc-3.3.4_glibc-2.3.2/bin/arm-linux-gcc
+KERNEL=/path/to/linux-s3c24xx
+DISPLAY_SRC=watchface-research/project/src/opentom_skel/bin
+"$ARM_GCC" -std=gnu89 -Wall -W -Werror -O2 \
+  -I"$KERNEL/include" \
+  "$DISPLAY_SRC/tomtom-display-receiver.c" \
+  "$DISPLAY_SRC/tomtom-display-protocol.c" \
+  -o /tmp/tomtom-display-receiver
+```
+
+This binary is experimental and not wired into startup. It writes to `/dev/fb0`
+and will conflict with the running watchface; do not launch it without an
+explicit display test and a verified way to restore the normal renderer. Its
+protocol is limited to 320x240 RGB565 frames (153,600 bytes each), USB-subnet
+peers, bounded socket timeouts, and at most 10 frames/second.
+
 ## Host relay and weather service
 
 ```sh

@@ -36,7 +36,7 @@ the native app**.
 |---|---|---|
 | PC notification test sender | Send a short test message over the USB link; show it in place of the weather content for about 15 seconds, then fade and restore weather. | The embedded preview has a bounded placeholder notification receiver; the native Windows app has no sender UI yet. |
 | Live weather card | Keep the existing TomTom weather card, local layout, battery, icons, and required provider attribution. Never present sample values as live data. | Implemented in the separate TomTom preview/weather services; not controlled by the native Studio app. |
-| TomTom as a PC display | Show PC-provided content on the 320x240 TomTom screen while it is USB-connected. | Not implemented. “Extended display” has two materially different meanings; see below. |
+| TomTom as a PC display | Show PC-provided content on the 320x240 TomTom screen while it is USB-connected. | Selected as true Windows extended monitor. An experimental TomTom frame receiver exists; Windows IDD/frame transport remains unimplemented. |
 
 ## Display scope that needs a decision
 
@@ -87,6 +87,13 @@ mirrored preview or Face Studio dashboard alone does not meet this requirement.
 4. The native Studio app provides user-facing start/stop/status and diagnostics;
    it is not itself the display driver.
 
+An experimental standalone C89 TomTom frame protocol and framebuffer receiver
+now exist under `watchface-research/project/src/opentom_skel/bin/`. They accept
+only fixed 320x240 RGB565 little-endian frames from the USB subnet, validate
+the framebuffer mode, and cap delivery at 10 fps. They are not installed or
+wired into device startup, and the Windows IDD-to-USB frame source is still
+unimplemented.
+
 The fixed 320x240 panel is the initial mode. Uncompressed RGB565 is 153,600
 bytes per frame (about 1.47 MiB); at 10 frames/second that is about 12.3
 Mbit/s before protocol overhead. Begin with a bounded low frame rate and
@@ -107,9 +114,9 @@ ordinary Studio `.exe`, but it is not a substitute for the Windows Driver Kit
    executable on actual Windows.
 3. Add a separate PC notification sender only after verifying the receiver
    packet contract and target TomTom renderer on the same branch.
-4. Implement and test the IDD, separate user-mode frame transport, and
-   TomTom-side receiver; cover bounded frame sizes/rates, disconnect recovery,
-   display-mode changes, and an explicit stop control.
+4. Implement and test the IDD and its user-mode frame transport to the
+   experimental receiver; cover bounded frame sizes/rates, disconnect
+   recovery, display-mode changes, and an explicit stop control.
 5. Build and label a final release only after Claude's review and physical
    Windows/TomTom verification. Keep preview builds separate from that final.
 

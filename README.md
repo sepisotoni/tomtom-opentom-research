@@ -15,6 +15,7 @@ map below before changing or installing anything.
 | See the last verified state and outstanding device work | [Current status](docs/CURRENT_STATUS.md) |
 | Connect to, transfer files to, deploy, or inspect the TomTom | [Device operations](docs/DEVICE_OPERATIONS.md) |
 | Keep device storage bounded and manage rollback files | [Device storage policy](docs/DEVICE_STORAGE.md) |
+| Review experimental PC-to-TomTom display framing and safety constraints | [Display stream prototype](docs/DISPLAY_STREAM.md) |
 | Work on the embedded visual preview | [Preview guide](watchface-research/preview/README.md) and [visual handoff](watchface-research/preview/VISUAL_DESIGN_HANDOFF.md) |
 | Run or change the desktop editor | [Face Studio guide](DOCS_FACE_STUDIO.md) |
 | Deploy the host weather relay | [Relay guide](tomtom-relay/README.md) |
