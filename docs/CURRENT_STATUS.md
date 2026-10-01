@@ -139,6 +139,7 @@ card-local layout with the info panel open.
   though signability/catalog generation completes. The owner manually ran the
   installed x64 InfVerif `/u` on the staged INF and it exited 0. This validates
   INF syntax only; runtime behavior and installation remain untested.
-  PowerShell reports `UnknownError` for the generated catalog and DLL signed
-  by the local `WDKTestCert Sepiso Toni` certificate; its trust/verification
-  status has not been established, so do not install the package.
+  SignTool confirmed the DLL is present in the generated catalog, but `/kp`
+  verification fails because the local `WDKTestCert Sepiso Toni` root is not
+  trusted. This is expected for an untrusted test certificate, not a trusted
+  production signature. Do not install or enable test-signing on the daily PC.

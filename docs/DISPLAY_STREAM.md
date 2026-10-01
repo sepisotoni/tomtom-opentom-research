@@ -81,12 +81,14 @@ mapping or a live PC-to-TomTom TCP connection.
 
 ## Remaining path to a true extended monitor
 
-1. Verify the generated catalog signature and the DLL's membership in it with
-   SignTool; PowerShell currently reports `UnknownError` for both files. The
-   staged x64 INF passed `InfVerif /u`, but that does not establish signing
-   trust or runtime behavior.
-2. Only after review, validate the temporary software-device control app on a
-   Windows test system and test protocol traffic over USB.
+1. Prepare an isolated Windows test machine for the local WDK test certificate
+   only if the owner explicitly chooses to test. SignTool confirmed the DLL is
+   in the generated catalog, but kernel-policy verification rejects its
+   untrusted test root. Do not enable test-signing or install it on the owner's
+   daily-use PC. Production distribution needs a properly trusted signing path.
+2. Once test signing and package review are deliberately handled, validate the
+   temporary software-device control app and then test protocol traffic over
+   USB.
 3. Build the TomTom receiver for the exact target headers and check its
    reported framebuffer mode before any deployment.
 4. Stop the watchface supervisor in a reversible, documented manner for a
