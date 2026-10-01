@@ -109,9 +109,12 @@ Compile from a working directory where the relative source paths above exist
 
 ### Experimental display receiver
 
-The C89 frame protocol can be checked on the host through the native Studio
-CMake test target (`display_protocol_tests`). Build the standalone receiver
-for the TomTom only with the matching legacy ARM compiler and kernel headers:
+The frame protocol, BGRA-to-RGB565 converter, and sender-worker lifecycle can
+be checked on the host through the native Studio CMake test targets
+`display_protocol_tests`, `display_frame_converter_tests`, and
+`display_frame_transport_tests`. These tests do not require a TomTom or prove
+live USB-network connectivity. Build the standalone receiver for the TomTom
+only with the matching legacy ARM compiler and kernel headers:
 
 ```sh
 ARM_GCC=/path/to/OpenTom/gcc-3.3.4_glibc-2.3.2/bin/arm-linux-gcc

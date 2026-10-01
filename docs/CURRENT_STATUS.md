@@ -122,6 +122,9 @@ card-local layout with the info panel open.
 - An experimental standalone C89 receiver and fixed 320x240 RGB565 frame
   protocol are now implemented and ARM-buildable. The receiver is not
   installed or supervised by device startup, and must not run alongside the
-  gallery renderer because both use `/dev/fb0`. Host protocol tests are
-  available through `display_protocol_tests`; the Windows IDD frame source and
-  transport are still missing.
+  gallery renderer because both use `/dev/fb0`. The native Studio tree now has
+  a BGRA8-to-RGB565 converter and a bounded USB-only TCP sender worker; it
+  keeps only the latest pending frame, limits delivery to 10 fps, waits for
+  validated ACKs, and sleeps/disconnects while idle. Host tests cover the
+  protocol, conversion, and worker lifecycle. The sender is not yet wired to
+  an IDD, and the WDK driver and physical end-to-end test remain outstanding.
