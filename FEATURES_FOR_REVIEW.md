@@ -90,9 +90,11 @@ mirrored preview or Face Studio dashboard alone does not meet this requirement.
 An experimental standalone C89 TomTom frame protocol and framebuffer receiver
 now exist under `watchface-research/project/src/opentom_skel/bin/`. They accept
 only fixed 320x240 RGB565 little-endian frames from the USB subnet, validate
-the framebuffer mode, and cap delivery at 10 fps. They are not installed or
-wired into device startup, and the Windows IDD-to-USB frame source is still
-unimplemented.
+the framebuffer mode, and cap delivery at 10 fps. The native Studio tree now
+also contains a tested BGRA-to-RGB565 converter and a bounded USB-only sender
+worker with one latest-frame slot, ACK validation, and idle disconnect. These
+components are not wired to an IDD, installed, or started automatically; the
+Windows IDD frame source and its WDK build are still unimplemented.
 
 The fixed 320x240 panel is the initial mode. Uncompressed RGB565 is 153,600
 bytes per frame (about 1.47 MiB); at 10 frames/second that is about 12.3

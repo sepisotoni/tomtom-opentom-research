@@ -21,6 +21,24 @@ main(void)
     struct tomtom_display_frame frame;
     int passed = 1;
 
+    tomtom_display_make_header(header, 0x78563412UL);
+    passed &= expect(header[0] == 'T' && header[1] == 'T' &&
+                     header[2] == 'D' && header[3] == 'P' &&
+                     tomtom_display_read_u16(header + 6) ==
+                         TOMTOM_DISPLAY_HEADER_SIZE &&
+                     tomtom_display_read_u16(header + 8) ==
+                         TOMTOM_DISPLAY_WIDTH &&
+                     tomtom_display_read_u16(header + 10) ==
+                         TOMTOM_DISPLAY_HEIGHT &&
+                     tomtom_display_read_u32(header + 14) ==
+                         0x78563412UL &&
+                     tomtom_display_read_u32(header + 18) ==
+                         TOMTOM_DISPLAY_FRAME_BYTES,
+                     "encode a frame header");
+    passed &= expect(tomtom_display_parse_header(
+                         header, sizeof(header), &frame),
+                     "parse a generated frame header");
+
     memset(header, 0, sizeof(header));
     header[0] = 'T';
     header[1] = 'T';
@@ -98,6 +116,6 @@ main(void)
 
     if (!passed)
         return 1;
-    puts("display frame protocol: 12 checks passed");
+    puts("display frame protocol: 14 checks passed");
     return 0;
 }

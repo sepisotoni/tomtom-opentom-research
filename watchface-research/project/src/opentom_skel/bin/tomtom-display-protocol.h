@@ -18,6 +18,10 @@
 #define TOMTOM_DISPLAY_ACK_RATE_LIMIT 2
 #define TOMTOM_DISPLAY_ACK_FRAMEBUFFER 3
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct tomtom_display_frame {
     unsigned long sequence;
 };
@@ -26,10 +30,16 @@ unsigned int tomtom_display_read_u16(const unsigned char *bytes);
 unsigned long tomtom_display_read_u32(const unsigned char *bytes);
 void tomtom_display_write_u16(unsigned char *bytes, unsigned int value);
 void tomtom_display_write_u32(unsigned char *bytes, unsigned long value);
+void tomtom_display_make_header(unsigned char *bytes,
+                                unsigned long sequence);
 int tomtom_display_parse_header(const unsigned char *bytes,
                                 unsigned long length,
                                 struct tomtom_display_frame *frame);
 void tomtom_display_make_ack(unsigned char *bytes, unsigned long sequence,
                              unsigned int status);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

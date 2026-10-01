@@ -123,4 +123,22 @@ if(FACESTUDIO_BUILD_TESTS)
   endif()
   add_test(NAME display_frame_converter_tests
     COMMAND display_frame_converter_tests)
+
+  add_executable(display_frame_transport_tests
+    tests/test_frame_transport.cpp
+    src/display/frame_transport.cpp
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  find_package(Threads REQUIRED)
+  target_link_libraries(display_frame_transport_tests PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(display_frame_transport_tests PRIVATE ws2_32)
+  endif()
+  if(MSVC)
+    target_compile_options(display_frame_transport_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_frame_transport_tests PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME display_frame_transport_tests
+    COMMAND display_frame_transport_tests)
 endif()
