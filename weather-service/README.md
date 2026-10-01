@@ -77,9 +77,11 @@ logged or returned. The 4 KiB bound applies to the response payload, not
 permission to persist it. Check Google's current terms before changing this
 behavior.
 
-Display the exact attribution **“Source: Includes weather data from Google”**
-on or next to weather content. The caller must obtain consent before sending a
-device location; a false or absent consent flag is rejected.
+Display the official Google Maps logo on or next to the weather content; use
+the exact text **“Google Maps”** only when the logo cannot fit. The TomTom
+preview uses Google's official light-outline logo in its weather card. The
+caller must obtain consent before sending a device location; a false or absent
+consent flag is rejected.
 
 ### Error codes
 

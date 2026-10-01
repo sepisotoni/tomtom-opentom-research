@@ -29,16 +29,20 @@ def format_values(values, per_line=8):
     return ",\n".join(lines)
 
 
-def convert_icon(input_path, output_path, symbol, alpha_threshold=128):
+def convert_icon(
+    input_path, output_path, symbol, alpha_threshold=128, max_dimension=MAX_DIMENSION
+):
+    if max_dimension < 1:
+        raise ValueError("maximum dimension must be positive")
     try:
         with Image.open(input_path) as source:
             image = source.convert("RGBA")
     except OSError as error:
         raise ValueError("input must be a readable PNG; rasterize SVG artwork first") from error
     width, height = image.size
-    if not width or not height or width > MAX_DIMENSION or height > MAX_DIMENSION:
+    if not width or not height or width > max_dimension or height > max_dimension:
         raise ValueError(
-            f"icon must be between 1x1 and {MAX_DIMENSION}x{MAX_DIMENSION}"
+            f"icon must be between 1x1 and {max_dimension}x{max_dimension}"
         )
 
     pixels = list(image.getdata())
@@ -99,11 +103,21 @@ def main():
         metavar="0..255",
         help="minimum alpha considered opaque (default: 128)",
     )
+    parser.add_argument(
+        "--max-dimension",
+        type=int,
+        default=MAX_DIMENSION,
+        help=f"maximum image width and height (default: {MAX_DIMENSION})",
+    )
     args = parser.parse_args()
     symbol = args.symbol or args.input.stem
     try:
         width, height = convert_icon(
-            args.input, args.output, symbol, args.alpha_threshold
+            args.input,
+            args.output,
+            symbol,
+            args.alpha_threshold,
+            args.max_dimension,
         )
     except ValueError as error:
         parser.error(str(error))

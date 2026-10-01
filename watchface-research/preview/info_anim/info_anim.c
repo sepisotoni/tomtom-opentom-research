@@ -3,19 +3,19 @@
 #include "info_anim_lut.h"
 
 /* ------------------------------------------------------------------ *
- * Timeline, in ms of the 600 ms master clock.  Mirrors the React
+ * Timeline, in ms of the 900 ms master clock.  Mirrors the React
  * prototype's CSS transitions exactly:
- *   clock   0..500   cubic-bezier(.4,0,.2,1)
- *   divider 100..600 cubic-bezier(.4,0,.2,1)  (grows down from the top)
- *   panel   200..600 ease                     (opacity)
+ *   clock   0..900   cubic-bezier(.22,.9,.25,1)
+ *   divider 100..600 cubic-bezier(.4,0,.2,1)  (legacy faces)
+ *   panel   360..800 ease                     (opacity)
  *   date    leaves 0..280 to the right, arrives 320..600 from the left
  * ------------------------------------------------------------------ */
 #define CLOCK_START    0
-#define CLOCK_DUR      500
+#define CLOCK_DUR      900
 #define DIVIDER_START  100
 #define DIVIDER_DUR    500
-#define PANEL_START    200
-#define PANEL_DUR      400
+#define PANEL_START    360
+#define PANEL_DUR      440
 #define DATE_OUT_START 0
 #define DATE_OUT_DUR   280
 #define DATE_IN_START  320
@@ -32,15 +32,18 @@
     {{162,   1, 76, 118}, {240,   1, 76, 118}, \
      {162, 120, 76, 118}, {240, 120, 76, 118}}
 #define FONT_INFO_4 \
-    {{164,   1, 70, 118}, {238,   1, 70, 118}, \
-     {164, 120, 70, 118}, {238, 120, 70, 118}}
+    {{161,   8, 68, 108}, {235,   8, 68, 108}, \
+     {161, 124, 68, 108}, {235, 124, 68, 108}}
 #define ROBOTO_INFO_4 \
-    {{168,   1, 70, 118}, {242,   1, 70, 118}, \
-     {168, 120, 70, 118}, {242, 120, 70, 118}}
+    {{206,  68, 26, 48}, {232,  68, 26, 48}, \
+     {206, 124, 26, 48}, {232, 124, 26, 48}}
+#define FONT_INFO_2 \
+    {{155, 55, 76, 130}, {233, 55, 76, 130}, \
+     {0, 0, 0, 0}, {0, 0, 0, 0}}
 #define INFO_2 \
     {{162, 55, 76, 130}, {240, 55, 76, 130}, {0, 0, 0, 0}, {0, 0, 0, 0}}
 #define ROBOTO_INFO_2 \
-    {{168, 61, 70, 118}, {242, 61, 70, 118}, {0, 0, 0, 0}, {0, 0, 0, 0}}
+    {{160, 61, 70, 118}, {234, 61, 70, 118}, {0, 0, 0, 0}, {0, 0, 0, 0}}
 
 static const IaLayout layouts[] = {
     /* [0] generic, side-by-side: digit_x[] = 8,82,170,244; DIGIT_Y 42;
@@ -61,7 +64,7 @@ static const IaLayout layouts[] = {
        { 83, 128, 70, 82}, {167, 128, 70, 82}},
       NUM_INFO_4 },
     /* [3] font faces stacked: x 101+col*63, y 42+row*88, 55x88;
-     *     info x 164+col*74, 70x118 */
+     *     info digits fit within the right panel and are centered at x=232. */
     { 4,
       {{101,  42, 55, 88}, {164,  42, 55, 88},
        {101, 130, 55, 88}, {164, 130, 55, 88}},
@@ -74,10 +77,10 @@ static const IaLayout layouts[] = {
     { 2,
       {{ 45, 35, 110, 190}, {165, 35, 110, 190}, {0, 0, 0, 0}, {0, 0, 0, 0}},
       INFO_2 },
-    /* [6] hour only, font faces: x 46+i*116, y 40, 112x176 */
+    /* [6] hour only, font faces: centered within the right info panel. */
     { 2,
       {{ 46, 40, 112, 176}, {162, 40, 112, 176}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-      INFO_2 },
+      FONT_INFO_2 },
     /* [7] Roboto side-by-side HH:MM -> the existing stacked info layout */
     { 4,
       {{ 20,  76, 55, 88}, { 75,  76, 55, 88},

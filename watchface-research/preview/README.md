@@ -18,14 +18,21 @@ does not install or select a persistent face.
 - `digit-atlas-roboto.pgm`, `digit-atlas-ubuntu.pgm`, and
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
 - Ubuntu and Nunito use a centered `HH` over `MM` layout. Roboto (style 6)
-  shows `HH:MM` side-by-side while the info panel is closed, then animates into
-  stacked `HH` over `MM` digits on the right half as the info panel opens.
-  Roboto's original blue minute color is retained; its open panel has a
-  dark-slate left background, Google's weather PNG icon, current temperature,
-  today's high/low, precipitation, Google attribution, and a straight,
-  subdued center divider. The battery icon is hidden on this face. All three
-  font faces show an enlarged hour-only view at `:00`. Weather updates never
-  open the info panel automatically.
+  shows `HH:MM` side-by-side while closed, then animates into two compact rows.
+  All three font faces shift the clock into a blue-outlined right panel as the
+  same weather card slides in on the left; the date hands off to the card's
+  upper left instead of crossing the clock. Expanded digits stay within and
+  are centered in a pure-black time panel. The battery moves to the info
+  card's upper-right; the weather icon sits by the temperature and uses the
+  Weather API icon when available, with a crisp native C-drawn fallback.
+  Red/blue maximum/minimum arrows are taller; precipitation is omitted.
+  Specific heat, cold, heavy-rain, storm, or snow alerts appear in a rounded
+  badge when active. High/low values appear only when supplied by the relay.
+  A small, aspect-preserving Google Maps logo sits at the card's bottom-left.
+  Dates on the font faces use the renderer's bitmap glyphs. The battery remains
+  in the time corner while closed and moves into the card when expanded. All
+  three font faces show an enlarged hour-only view at `:00`. Weather updates
+  never open the info panel automatically.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
   `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
   range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.
@@ -34,14 +41,27 @@ does not install or select a persistent face.
   `cycle_start` and `cycle_count` can limit cycling to any contiguous range of
   styles available in the executable. Atlas paths are relative to `artwork_dir`.
 
+The font faces (styles 6–8) also accept WhatsApp-style placeholder
+notifications over the TomTom USB link: `OT1|N|15|Test message received`
+sent as UDP to port `45872`. A notification opens the info panel if needed,
+shows a chat icon and message in place of the weather content, then fades out
+over its final 1.5 seconds. Weather content returns after the notification has
+fully faded; the two contents are never cross-faded over one another. The
+message is limited to 32 printable ASCII characters and kept only in RAM.
+Packets from outside `192.168.101.0/24` are ignored; this event channel is
+unencrypted and is meant for the isolated USB connection, not an exposed
+network.
+
 For new icons and animation design, read
 [`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
-Nano-X constraints and the PNG-to-RGB565 sprite-header converter.
+Nano-X constraints and the PNG-to-RGB565 sprite-header converter. The official
+Google Maps attribution logo source and generated device sprite are in
+`assets/google-maps-attribution/`.
 The `info_anim/` module is integrated into this renderer. A screen tap cycles
 the configured faces and closes any open info panel; `SIGUSR2` opens or closes
-the panel. Weather updates do not trigger animation. The required Google
-attribution is wrapped inside the info panel, and clock seconds are suppressed
-during the transition to avoid drawing over the enlarged time. A quick
+the panel. Weather updates do not trigger animation. The required Google Maps
+logo attribution is wrapped inside the info panel, and clock seconds are
+suppressed during the transition to avoid drawing over the enlarged time. A quick
 power-button press also toggles the panel through the OS-side duration
 configuration (`<=250 ms` quick action; `251-399 ms` no action). Face selection
 is also available through Face Studio and `SIGUSR1`.
@@ -107,6 +127,8 @@ mapped framebuffer instead of calling `GrCopyArea`. This is a temporary
 presentation-path comparison, not the default: it still uses Nano-X for
 drawing and input, so it does not reduce software rasterization cost. The
 experimental binary exits if the framebuffer is not exactly 320x240 RGB565.
+The current TomTom installation can use `-DWATCHFACE_DIRECT_FB` without the
+profile flag when direct framebuffer presentation is desired.
 
 Regenerate the rounded glyph atlas on a desktop with Pillow installed:
 
@@ -177,8 +199,9 @@ or a rate-limit response. The renderer reads that RAM summary every 15
 seconds; this is a local cache refresh, not a weather-provider request. The
 relay returns a `no-store` summary; the renderer suppresses ordinary
 conditions and shows noteworthy precipitation, storms, or temperature
-extremes when the panel is opened by touch. Roboto uses the official Google
-weather PNG; other preview faces continue to use native Nano-X weather glyphs.
+extremes when the panel is opened by touch. The dedicated weather face uses
+the official Google weather PNG; the font-face info card uses that PNG when
+settled and native C-drawn symbols during transitions.
 The Material SVGs are references, not runtime assets. The
 `MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
 references and licensing; selected SVGs and the Apache-2.0 license are kept

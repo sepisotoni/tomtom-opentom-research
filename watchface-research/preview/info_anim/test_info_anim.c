@@ -61,8 +61,8 @@ test_roboto_side_by_side_layout(void)
           l->to[2].y == l->to[3].y &&
           l->to[0].y < l->to[2].y,
           "Roboto info endpoint is stacked");
-    CHECK((l->to[0].x + l->to[3].x + l->to[3].w) / 2 == 240,
-          "Roboto expanded digits are centered in the right half");
+    CHECK((l->to[0].x + l->to[3].x + l->to[3].w) / 2 == 232,
+          "Roboto expanded digits are centered in the clock panel");
     for (i = 0; i < l->n; ++i) {
         CHECK(l->to[i].x >= 160,
               "Roboto info digits remain on the right half");
@@ -71,12 +71,22 @@ test_roboto_side_by_side_layout(void)
     }
     l = ia_layout_for(IA_KIND_ROBOTO, 0, 1);
     CHECK(l->n == 2, "Roboto hour-only info shows two digits");
-    CHECK((l->to[0].x + l->to[1].x + l->to[1].w) / 2 == 240,
-          "Roboto hour-only digits are centered in the right half");
+    CHECK((l->to[0].x + l->to[1].x + l->to[1].w) / 2 == 232,
+          "Roboto hour-only digits are centered in the clock panel");
     for (i = 0; i < l->n; ++i)
         CHECK(l->to[i].x >= 160 &&
               l->to[i].x + l->to[i].w <= 320,
               "Roboto hour-only digits fit in the right half");
+
+    l = ia_layout_for(IA_KIND_FONT, 0, 0);
+    CHECK((l->to[0].x + l->to[3].x + l->to[3].w) / 2 == 232,
+          "font-face expanded digits are centered in the clock panel");
+    CHECK(l->to[0].y == 8 && l->to[2].y + l->to[2].h == 232,
+          "font-face expanded digits fit vertically inside the clock panel");
+    l = ia_layout_for(IA_KIND_FONT, 0, 1);
+    CHECK((l->to[0].x + l->to[1].x + l->to[1].w) / 2 == 232,
+          "font-face hour-only digits are centered in the clock panel");
+
     CHECK(font->from[0].y < font->from[2].y,
           "Ubuntu and Nunito retain their existing stacked layout");
     l = ia_layout_for(IA_KIND_ROBOTO, 0, 0);
@@ -129,12 +139,64 @@ test_timeline_endpoints(void)
     CHECK(ld == 0 && la == 255, "left date settled, opaque");
     CHECK(ia_divider(IA_ONE) == IA_ONE, "divider full");
     CHECK(ia_panel_alpha(IA_ONE) == 255, "panel opaque");
-    /* stagger: at 100 ms the divider has not started, panel at 200 ms not */
+    /* stagger: divider starts at 100 ms; the info card starts at 360 ms */
     CHECK(ia_divider(100 * IA_ONE / IA_TOTAL_MS) == 0, "divider waits 100 ms");
-    CHECK(ia_panel_alpha(200 * IA_ONE / IA_TOTAL_MS) == 0, "panel waits 200 ms");
+    CHECK(ia_panel_alpha(360 * IA_ONE / IA_TOTAL_MS) == 0, "panel waits 360 ms");
+    CHECK(ia_panel_alpha(400 * IA_ONE / IA_TOTAL_MS) > 0,
+          "panel is visible after the clock clears its bounds");
     /* date handoff: gone by 280, new one not before 320 */
     ia_date(300 * IA_ONE / IA_TOTAL_MS, &cd, &ca, &ld, &la);
     CHECK(ca == 0 && la == 0, "date is fully out before the new one arrives");
+}
+
+static void
+test_info_card_clock_clearance(void)
+{
+    int kind;
+    int hour;
+    int p;
+    int i;
+
+    for (kind = IA_KIND_FONT; kind <= IA_KIND_ROBOTO; ++kind)
+        for (hour = 0; hour <= 1; ++hour) {
+      const IaLayout *layout = ia_layout_for(kind, 0, hour);
+      int clear = 1;
+
+      for (p = 0; p <= IA_ONE; ++p) {
+          int card_x;
+          int card_y;
+          int card_right;
+          int card_bottom;
+          int first_overlap = -1;
+
+          if (ia_panel_alpha(p) == 0)
+              continue;
+          card_x = -50 + 55 * p / IA_ONE;
+          card_y = 5;
+          card_right = card_x + 138;
+          card_bottom = card_y + 230;
+          for (i = 0; i < layout->n; ++i) {
+              IaRect digit;
+
+              ia_digit_rect(layout, i, p, &digit);
+              if (digit.x < card_right &&
+                  digit.x + digit.w > card_x &&
+                  digit.y < card_bottom &&
+                  digit.y + digit.h > card_y) {
+                  clear = 0;
+                  if (first_overlap < 0)
+                      first_overlap = i;
+              }
+          }
+          if (!clear) {
+              printf("overlap: kind=%d hour=%d t=%dms digit=%d\n",
+                     kind, hour,
+                     p * IA_TOTAL_MS / IA_ONE, first_overlap);
+              break;
+          }
+      }
+      CHECK(clear, "clock digits never overlap the visible info card");
+        }
 }
 
 static void
@@ -149,7 +211,7 @@ test_open_close_and_reversal(void)
     ia_request(&a, 1, 1000);
     CHECK(ia_progress(&a, 1000) == 0, "opening starts at 0");
     CHECK(ia_active(&a, 1200), "active mid-way");
-    CHECK(ia_progress(&a, 1000 + IA_TOTAL_MS) == IA_ONE, "fully open at 600 ms");
+    CHECK(ia_progress(&a, 1000 + IA_TOTAL_MS) == IA_ONE, "fully open at 900 ms");
     CHECK(!ia_active(&a, 1000 + IA_TOTAL_MS), "not active when done");
 
     /* reverse at 200 ms: no jump, then runs back down */
@@ -165,7 +227,7 @@ test_open_close_and_reversal(void)
     CHECK(ia_progress(&a, 1200 + IA_TOTAL_MS) == 0, "returns to 0");
     /* closing from p takes proportionally less time (no restart) */
     CHECK(ia_progress(&a, 1200 + before * IA_TOTAL_MS / IA_ONE + 2) == 0,
-          "close from mid-way is shorter, not a full 600 ms");
+          "close from mid-way is shorter, not a full 900 ms");
 
     /* settled state survives a huge time jump (32-bit ms wrap) */
     ia_init(&a);
@@ -294,7 +356,9 @@ test_stall_clamp_and_colon(void)
     ia_tick(&a, 730);
     ia_tick(&a, 830);
     ia_tick(&a, 930);
-    CHECK(!ia_active(&a, 930) && ia_progress(&a, 930) == IA_ONE,
+    ia_tick(&a, 1030);
+    ia_tick(&a, 1100);
+    CHECK(!ia_active(&a, 1100) && ia_progress(&a, 1100) == IA_ONE,
           "clamped animation completes after its extended timeline");
 }
 
@@ -365,6 +429,7 @@ main(int argc, char **argv)
     test_roboto_side_by_side_layout();
     test_monotone_and_no_overshoot();
     test_timeline_endpoints();
+    test_info_card_clock_clearance();
     test_open_close_and_reversal();
     test_policy();
     test_stall_clamp_and_colon();

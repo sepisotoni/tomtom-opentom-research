@@ -5,6 +5,12 @@ watchface preview, an OpenTom device runtime, and separate host/weather
 services. Read the task-specific source and documentation before editing;
 similar-looking watchface files can belong to different runtimes.
 
+Use the root `README.md` as the project landing page, `AI.md` for task routing,
+and `docs/REPOSITORY_MAP.md` for source discovery. The detailed build and
+device-transfer procedures are in `docs/DEVELOPMENT.md`,
+`docs/DEVICE_OPERATIONS.md`, and `docs/DEVICE_STORAGE.md`; avoid duplicating
+their full contents here.
+
 ## Visual watchface work
 
 For icon, artwork, or animation tasks, start with:
@@ -35,17 +41,22 @@ host compiler/tests when the target toolchain is unavailable.
 
 ## Device and network safety
 
-- Do not deploy, restart, or reboot the TomTom unless the user asks for that
-  device operation in the current task.
+- Deploy, restart, or clean the TomTom only when the user explicitly requests
+  that device operation in the current task. Follow the USB-only procedures in
+  `docs/DEVICE_OPERATIONS.md` and `docs/DEVICE_STORAGE.md`.
 - Do not log, commit, or expose GPS coordinates, API tokens, or weather payloads.
 - Weather content is transient and must not be cached to persistent device or
   host storage. Preserve the existing explicit location-consent and
   Google-attribution requirements.
 - The direct USB control service is unauthenticated. Never expose it beyond the
-  isolated USB subnet.
+  isolated USB subnet. Telnet is unencrypted; do not expose it or store device
+  login details in repository files.
 - Verify the actual hardware and running source before relying on values in
   older narrative/specification documents; distinguish measured facts from
   design assumptions.
+- Before deleting device backups, archive and verify them on host storage, keep
+  one rollback on the TomTom, and enumerate only exact deletion paths. If the
+  device is offline, stop and state that cleanup remains incomplete.
 
 ## Validation and delivery
 

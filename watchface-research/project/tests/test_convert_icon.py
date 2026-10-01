@@ -56,6 +56,23 @@ class ConvertIconTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "64x64"):
                 convert_icon.convert_icon(source, root / "out.h", "large")
 
+    def test_wide_official_attribution_logo_uses_explicit_bound(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "maps-logo.png"
+            output = root / "maps_logo.h"
+            Image.new("RGBA", (105, 22), (255, 255, 255, 255)).save(source)
+
+            self.assertEqual(
+                convert_icon.convert_icon(
+                    source, output, "maps_logo", max_dimension=128
+                ),
+                (105, 22),
+            )
+            header = output.read_text(encoding="ascii")
+            self.assertIn("#define MAPS_LOGO_WIDTH 105", header)
+            self.assertIn("#define MAPS_LOGO_HEIGHT 22", header)
+
     def test_c_identifier_is_safe(self):
         self.assertEqual(convert_icon.c_identifier("3-rain/icon"), "icon_3_rain_icon")
 

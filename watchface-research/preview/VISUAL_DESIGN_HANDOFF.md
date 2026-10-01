@@ -36,11 +36,15 @@ prototype.
 - `assets/material-weather/` contains selected Apache-2.0 Material Design SVG
   references and its license. The preview draws native C weather symbols; it
   does not rasterize or load these SVGs at runtime.
+- `assets/google-maps-attribution/` contains the official Maps attribution
+  logo used by the weather card.
 - `generate_numerals_atlas.py` and `generate_font_atlas.py` show the existing
   Pillow-based source-to-atlas approach.
 - `convert_icon.py` converts a transparent PNG to a bounded C89 RGB565 sprite
-  and 1-bit opacity mask. It rejects artwork larger than 64x64 rather than
-  silently resampling a design.
+  and 1-bit opacity mask. By default, it rejects artwork larger than 64x64
+  rather than silently resampling a design. An explicit `--max-dimension`
+  override is available for official wide wordmark assets whose native
+  dimensions must be preserved.
 
 For a new icon, keep the editable source (SVG or RGBA PNG) and generated C
 header. Use a descriptive name, document the source/license, and inspect the

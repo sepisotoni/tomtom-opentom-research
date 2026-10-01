@@ -15,7 +15,7 @@
 #define INFO_ANIM_H
 
 #define IA_ONE          1024   /* fixed-point 1.0 */
-#define IA_TOTAL_MS     600    /* full open or close, ms */
+#define IA_TOTAL_MS     900    /* full open or close, ms */
 #define IA_DWELL_MS     30000  /* auto-mode: min time between auto changes */
 #define IA_MAX_STEP_MS  100    /* cap animation progress after a stalled frame */
 #define IA_MAX_DIGITS   4

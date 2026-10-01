@@ -4,8 +4,8 @@ This C89 geometry/timing module is integrated into `../live_watchface.c` for
 the Ubuntu, Roboto, Nunito, Numerals Duo, and generic preview faces. It
 contains no Nano-X calls, drawing, heap allocation, or floating-point math.
 The renderer supplies the geometry and fades the weather panel and dates.
-Animation timing: 600 ms total (clock 0-500 ms, divider 100-600 ms, panel fade
-200-600 ms, date out 0-280 ms / in 320-600 ms).
+Animation timing: 900 ms total (clock 0-900 ms, legacy divider 100-600 ms,
+panel fade 360-800 ms, date out 0-280 ms / in 320-600 ms).
 
 | File | Purpose |
 |---|---|
@@ -34,16 +34,21 @@ of Nano-X rendering or on-device performance.
   trigger animation while the interaction is being evaluated.
 - The renderer uses `ia_layout_for()` and `ia_digit_rect()` for the transition
   from the normal clock to the weather-panel layout. Roboto starts with `HH:MM`
-  side-by-side and animates into stacked `HH` over `MM` digits on the right
-  half when the panel opens, centered on that half in both the full-time and
-  hour-only layouts. Its original blue minute color is retained; the
-  panel fades in with a dark-slate left background, compact text-only weather
-  details, subdued Google attribution, and a straight, subdued center divider.
-  The battery icon is hidden on this face. Ubuntu and Nunito retain their
-  stacked clock layout. Each animation frame is rendered completely into the
-  backbuffer, including the clock details, before it is copied to the screen;
-  this avoids stale text artifacts when closing the panel.
-- The event timeout drops to 33 ms only while the 600 ms transition is active;
+  side-by-side and animates into two stacked rows of digits in an inset right
+  clock panel. Font-face digits are centered and kept within the panel bounds.
+  A bordered weather card slides in on the left with live conditions and
+  decorative mountain shapes. Card labels are drawn from a pixel glyph atlas
+  rather than Nano-X text calls; a red upward arrow marks the daily maximum
+  and a blue downward arrow marks the minimum. The battery sits at the card's
+  upper right and the condition icon by the temperature; precipitation is
+  omitted. High/low values appear only when the relay supplies them, and a
+  small official Google Maps logo remains at the card's bottom-left. Specific
+  alerts appear in a rounded badge. Font-face dates use bitmap glyphs. The
+  Roboto minute color is retained. Ubuntu and Nunito retain their existing
+  stacked clock layouts. Each animation frame is rendered completely into the
+  backbuffer before it is copied to the screen, avoiding stale text when
+  closing the panel.
+- The event timeout drops to 33 ms only while the 900 ms transition is active;
   frame starts are paced 33 ms apart, compensating for draw time. A delayed
   frame advances the animation by at most 100 ms, avoiding large visual jumps.
   Face-file writes and weather polling wait until the transition settles.
