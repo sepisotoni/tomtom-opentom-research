@@ -68,6 +68,8 @@ jobs:
           $lines += "- Idle after 8 s (window open, live 1 Hz preview): working set $ws MiB, private bytes $priv MiB"
           Stop-Process -Id $proc.Id -Force
           $lines | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY
+          # Also publish as a check annotation so the numbers are readable through the checks API.
+          Write-Host "::notice title=TomTomFaceStudio.exe footprint::$($lines -join ' | ')"
 
       - name: Upload the executable
         uses: actions/upload-artifact@v4
