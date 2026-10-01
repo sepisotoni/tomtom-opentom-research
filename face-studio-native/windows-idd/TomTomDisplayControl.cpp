@@ -55,7 +55,7 @@ int wmain() {
         SwDeviceClose(device);
         WaitForSingleObject(result.event, INFINITE);
         CloseHandle(result.event);
-        std::fwprintf(stderr, L"Timed out waiting for software device creation.\n");
+        ::fwprintf(stderr, L"Timed out waiting for software device creation.\n");
         return 1;
     }
     CloseHandle(result.event);
