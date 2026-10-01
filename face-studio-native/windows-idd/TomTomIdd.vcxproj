@@ -14,7 +14,7 @@
     <ProjectGuid>{1DF0DCED-A5A3-48C1-B784-9EE5DE194E6C}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>TomTomIdd</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
@@ -52,10 +52,10 @@
     <Driver_SpectreMitigation>Spectre</Driver_SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="ExtensionSettings" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <TargetName>TomTomIdd</TargetName>
@@ -68,7 +68,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\src\display;$(ProjectDir)..\..\watchface-research\project\src\opentom_skel\bin;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WindowsSdkDir)Include\$(WindowsTargetPlatformVersion)\um\iddcx\1.4;$(ProjectDir)..\src\display;$(ProjectDir)..\..\watchface-research\project\src\opentom_skel\bin;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WIN64;_AMD64_;AMD64;_ATL_NO_WIN_SUPPORT;UMDF_DRIVER;IDDCX_VERSION_MAJOR=1;IDDCX_VERSION_MINOR=4;IDDCX_MINIMUM_VERSION_REQUIRED=4;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>

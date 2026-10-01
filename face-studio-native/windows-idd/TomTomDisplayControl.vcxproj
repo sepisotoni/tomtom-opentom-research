@@ -40,7 +40,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>swdevice.lib;cfgmgr32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>swdevice.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(TargetPath)</OutputFile>
     </Link>
   </ItemDefinitionGroup>
