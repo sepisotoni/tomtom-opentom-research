@@ -30,7 +30,16 @@ jobs:
         run: cmake -S face-studio-native -B build -A x64
 
       - name: Build (Release)
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            # Surface compiler/linker errors as an annotation (job logs are not always reachable).
+            $errs = Get-Content build.log | Where-Object { $_ -match ' error ' -or $_ -match 'fatal error' -or $_ -match 'LNK\d+' } | Select-Object -First 12
+            Write-Host "::error title=Build failed::$($errs -join '%0A')"
+          }
+          exit $code
 
       - name: Unit tests (core + display protocol/converter/transport; fake loopback servers)
         shell: pwsh
