@@ -38,8 +38,8 @@ python3 test_studio.py
 python3 build_studio.py
 ```
 
-* **Linux Output**: [`dist/TomTomFaceStudio/TomTomFaceStudio`](file:///home/sepisotoni/projects/tomtom-opentom-research/dist/TomTomFaceStudio/TomTomFaceStudio) (Linux 64-bit ELF executable).
-* **Windows Executable Note**: A native Windows `.exe` binary was **not** produced because the build harness ran in the host Linux environment. To generate a Windows `.exe`, run `python build_studio.py` directly on a Windows host machine with Python 3 and PyInstaller.
+* **Linux Output**: `dist/TomTomFaceStudio/TomTomFaceStudio` (Linux 64-bit ELF executable).
+* **Windows Output**: The Python/PyInstaller build remains host-specific. For a native Windows `.exe`, use the separate C++ implementation in [`face-studio-native/`](face-studio-native/README.md); it can be cross-compiled from Linux with MinGW-w64.
 
 ---
 

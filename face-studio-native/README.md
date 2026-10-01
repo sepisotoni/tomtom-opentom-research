@@ -110,6 +110,10 @@ Measured on the GitHub Actions `windows-latest` runner (MSVC, Release, `/MT`, `/
   gallery preview PNGs are valid 160×120 PNGs but **not byte-identical** to the Python ones (all other gallery files are).
 * Integers outside 64 bits keep their exact digits for validation messages but are otherwise treated as out of range.
 * Verified under Wine 9 and in unit tests; a run on physical Windows is still owed (the CI artifact is the vehicle).
+* The app does **not** mirror PC pixels, send notification events, or create a Windows
+  virtual/extended monitor. Its Device tab only uses the narrow face-selection
+  protocol. The proposed display scope is tracked separately in
+  [`../FEATURES_FOR_REVIEW.md`](../FEATURES_FOR_REVIEW.md).
 
 ## CPU model: unresolved
 
