@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(TomTomFaceStudio VERSION 1.0.0 LANGUAGES CXX)
+# Version shown in the exe's file properties. Releases pass the tag, e.g.
+#   cmake -DFACESTUDIO_VERSION=1.2.3 ...        (a "-rc1" style suffix may be given via FACESTUDIO_VERSION_LABEL)
+set(FACESTUDIO_VERSION "1.0.0" CACHE STRING "Numeric major.minor.patch for the Windows version resource")
+set(FACESTUDIO_VERSION_LABEL "" CACHE STRING "Display version, e.g. 1.2.3-rc1 (defaults to FACESTUDIO_VERSION)")
+if(NOT FACESTUDIO_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR "FACESTUDIO_VERSION must look like 1.2.3 (got '${FACESTUDIO_VERSION}')")
+endif()
+project(TomTomFaceStudio VERSION ${FACESTUDIO_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,9 +74,18 @@ endif()
 # GUI application (Win32 + GDI + WIC; system DLLs only)
 # ---------------------------------------------------------------------------
 if(WIN32 AND FACESTUDIO_BUILD_APP)
+  string(REPLACE "." "," FS_VERSION_COMMA "${FACESTUDIO_VERSION}.0")
+  set(FS_VERSION_FULL "${FACESTUDIO_VERSION}.0")
+  if(FACESTUDIO_VERSION_LABEL)
+    set(FS_VERSION_LABEL "${FACESTUDIO_VERSION_LABEL}")
+  else()
+    set(FS_VERSION_LABEL "${FACESTUDIO_VERSION}")
+  endif()
+  set(FS_MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/app/app.manifest")
+  configure_file(src/app/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
   add_executable(TomTomFaceStudio WIN32
     src/app/main.cpp
-    src/app/app.rc)
+    "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
   target_link_libraries(TomTomFaceStudio PRIVATE facestudio_core
     user32 gdi32 comctl32 comdlg32 shell32 ole32 windowscodecs uuid)
   target_compile_definitions(TomTomFaceStudio PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)

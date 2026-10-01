@@ -1,11 +1,11 @@
 #include <windows.h>
 
 // RT_MANIFEST (24) with CREATEPROCESS_MANIFEST_RESOURCE_ID (1)
-1 24 "app.manifest"
+1 24 "@FS_MANIFEST_PATH@"
 
 1 VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION @FS_VERSION_COMMA@
+PRODUCTVERSION @FS_VERSION_COMMA@
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -14,11 +14,11 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "FileDescription", "TomTom Face Studio (native)"
-      VALUE "FileVersion", "1.0.0.0"
+      VALUE "FileVersion", "@FS_VERSION_FULL@"
       VALUE "InternalName", "TomTomFaceStudio"
       VALUE "OriginalFilename", "TomTomFaceStudio.exe"
       VALUE "ProductName", "TomTom Face Studio"
-      VALUE "ProductVersion", "1.0.0"
+      VALUE "ProductVersion", "@FS_VERSION_LABEL@"
     END
   END
   BLOCK "VarFileInfo"
