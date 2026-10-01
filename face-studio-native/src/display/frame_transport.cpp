@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "frame_transport.h"
 
 #include "../../../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.h"

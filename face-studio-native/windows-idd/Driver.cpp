@@ -116,6 +116,7 @@ public:
         if (thread_) {
             WaitForSingleObject(thread_, INFINITE);
             CloseHandle(thread_);
+            thread_ = nullptr;
         }
         if (stop_event_) {
             CloseHandle(stop_event_);
@@ -152,6 +153,10 @@ private:
                 L"TomTom IDD: failed to attach the Direct3D device to the swap chain.\n");
         }
         transport_.stop();
+        if (swap_chain_) {
+            WdfObjectDelete(reinterpret_cast<WDFOBJECT>(swap_chain_));
+            swap_chain_ = nullptr;
+        }
         if (task) {
             AvRevertMmThreadCharacteristics(task);
         }
@@ -243,10 +248,13 @@ private:
             auto result = IddCxSwapChainReleaseAndAcquireBuffer(swap_chain_,
                                                                 &buffer);
             if (result == E_PENDING) {
-                HANDLE events[] = {frame_event_, stop_event_};
+                HANDLE events[] = {stop_event_, frame_event_};
                 const auto wait = WaitForMultipleObjects(
                     ARRAYSIZE(events), events, FALSE, INFINITE);
                 if (wait == WAIT_OBJECT_0) {
+                    break;
+                }
+                if (wait == WAIT_OBJECT_0 + 1) {
                     continue;
                 }
                 break;
