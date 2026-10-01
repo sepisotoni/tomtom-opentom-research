@@ -81,11 +81,11 @@ mapping or a live PC-to-TomTom TCP connection.
 
 ## Remaining path to a true extended monitor
 
-1. Manually validate the staged IDD INF with x64 `InfVerif`; the first WDK build
-   compiled/linked and generated its catalog, but automatic INF verification
-   raised the known missing x86 verifier DLL exception.
-2. Review the verified package, then validate the temporary software-device
-   control app on a Windows test system and test protocol traffic over USB.
+1. Review the generated package artifacts and test-signing state; staged x64
+   INF passed `InfVerif /u`, but this does not validate runtime behavior or
+   signing trust.
+2. Only after review, validate the temporary software-device control app on a
+   Windows test system and test protocol traffic over USB.
 3. Build the TomTom receiver for the exact target headers and check its
    reported framebuffer mode before any deployment.
 4. Stop the watchface supervisor in a reversible, documented manner for a

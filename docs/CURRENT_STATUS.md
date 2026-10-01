@@ -136,5 +136,7 @@ card-local layout with the info panel open.
   has been installed. The owner Windows WDK 10.0.26100 build has now compiled
   and linked the IDD DLL and control utility, and generated a signed catalog.
   Automatic InfVerif still reports the known missing x86 verifier DLL even
-  though signability/catalog generation completes; separately verify the
-  staged INF with the installed x64 InfVerif before considering installation.
+  though signability/catalog generation completes. The owner manually ran the
+  installed x64 InfVerif `/u` on the staged INF and it exited 0. This validates
+  INF syntax only; runtime behavior, signing trust, and installation remain
+  untested.

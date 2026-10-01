@@ -22,8 +22,10 @@ Microsoft sample source. The Windows WDK 10.0.26100 build compiled and linked
 the driver DLL, control utility, and generated a driver catalog. The build's
 automatic `InfVerif` invocation reported that it could not load
 `x86\InfVerif.dll`; MSBuild nevertheless completed signability/catalog work
-with no listed signing errors. The staged INF still needs separate manual
-x64 `InfVerif` validation. No driver has been installed.
+with no listed signing errors. The owner separately ran the x64 `InfVerif /u`
+against the staged INF; it exited 0. This validates the INF syntax, not driver
+runtime behavior, signing trust, or installation safety. No driver has been
+installed.
 
 ## Build on Windows
 
