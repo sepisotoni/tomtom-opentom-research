@@ -81,6 +81,12 @@ Do not transfer using shell echo/base64 or interactive terminal copy/paste.
 Binary-safe HTTP over the isolated USB link avoids terminal encoding and line
 discipline corruption. Serve only files intended for the device.
 
+The observed device uses an old BusyBox shell. Its applet set/options differ
+from a desktop Linux system; for example, common `command`/`tail` applets and
+`grep -E` were unavailable during the last session. Check `/bin/busybox
+--list` and test a command's supported options before relying on it in a
+script. Prefer bounded, explicit commands over assumptions about GNU utilities.
+
 Example host-side staging (use the currently assigned USB host IP, not
 necessarily `.114`):
 
