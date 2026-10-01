@@ -51,8 +51,15 @@ int wmain() {
     }
 
     const DWORD wait = WaitForSingleObject(result.event, 15000);
+    if (wait != WAIT_OBJECT_0) {
+        SwDeviceClose(device);
+        WaitForSingleObject(result.event, INFINITE);
+        CloseHandle(result.event);
+        std::fwprintf(stderr, L"Timed out waiting for software device creation.\n");
+        return 1;
+    }
     CloseHandle(result.event);
-    if (wait != WAIT_OBJECT_0 || FAILED(result.status)) {
+    if (FAILED(result.status)) {
         ::fwprintf(stderr, L"Software device creation failed: 0x%08lx\n",
                    static_cast<unsigned long>(result.status));
         SwDeviceClose(device);
