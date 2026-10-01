@@ -6,7 +6,7 @@ set(FACESTUDIO_VERSION_LABEL "" CACHE STRING "Display version, e.g. 1.2.3-rc1 (d
 if(NOT FACESTUDIO_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "FACESTUDIO_VERSION must look like 1.2.3 (got '${FACESTUDIO_VERSION}')")
 endif()
-project(TomTomFaceStudio VERSION ${FACESTUDIO_VERSION} LANGUAGES CXX)
+project(TomTomFaceStudio VERSION ${FACESTUDIO_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,6 +93,11 @@ if(WIN32 AND FACESTUDIO_BUILD_APP)
   if(MSVC)
     target_link_options(TomTomFaceStudio PRIVATE /MANIFEST:NO)  # manifest is embedded via app.rc
   endif()
+
+  if(MSVC)
+    add_executable(TomTomDisplayControl windows-idd/TomTomDisplayControl.cpp)
+    target_link_libraries(TomTomDisplayControl PRIVATE cfgmgr32)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -112,4 +117,49 @@ if(FACESTUDIO_BUILD_TESTS)
   add_executable(ttface_tool tests/ttface_tool.cpp)
   target_link_libraries(ttface_tool PRIVATE facestudio_core)
   facestudio_shrink(ttface_tool)
+
+  add_executable(display_protocol_tests
+    ../watchface-research/project/tests/test_display_protocol.c
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  set_target_properties(display_protocol_tests PROPERTIES
+    C_STANDARD 90
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF)
+  if(MSVC)
+    target_compile_options(display_protocol_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_protocol_tests PRIVATE
+      -Wall -Wextra -pedantic -Werror)
+  endif()
+  add_test(NAME display_protocol_tests COMMAND display_protocol_tests)
+
+  add_executable(display_frame_converter_tests
+    tests/test_frame_converter.cpp
+    src/display/frame_converter.cpp)
+  if(MSVC)
+    target_compile_options(display_frame_converter_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_frame_converter_tests PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME display_frame_converter_tests
+    COMMAND display_frame_converter_tests)
+
+  add_executable(display_frame_transport_tests
+    tests/test_frame_transport.cpp
+    src/display/frame_transport.cpp
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  find_package(Threads REQUIRED)
+  target_link_libraries(display_frame_transport_tests PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(display_frame_transport_tests PRIVATE ws2_32)
+  endif()
+  if(MSVC)
+    target_compile_options(display_frame_transport_tests PRIVATE /W4)
+  else()
+    target_compile_options(display_frame_transport_tests PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME display_frame_transport_tests
+    COMMAND display_frame_transport_tests)
 endif()

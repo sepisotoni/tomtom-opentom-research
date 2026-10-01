@@ -96,3 +96,50 @@ checks; the notification parser/timing test passed; the direct-framebuffer ARM
 renderer build completed. No Python test suites were run for the dynamic-card
 change, per preference. The latest on-device capture above verifies the
 card-local layout with the info panel open.
+
+## Native Windows Face Studio branch
+
+- Work branch: `native-face-studio`.
+- Local MinGW-w64 Release build:
+  `build/native-face-studio-windows/TomTomFaceStudio.exe` (474,112 bytes).
+- The executable is a Windows x64 PE and imports only OS DLLs; its GUI was not
+  launched on physical Windows during this build.
+- The portable C++ core was built natively and its CTest suite passed.
+- The checked-in app currently covers face authoring/package workflows and
+  basic USB face selection. Windows desktop streaming/extended-monitor support
+  and a PC notification sender are not present in this native app yet. See
+  [`FEATURES_FOR_REVIEW.md`](../FEATURES_FOR_REVIEW.md).
+- The owner confirmed that “extend as a display” means a true Windows second
+  monitor, not a mirror. This needs a WDK-built/test-signed IDD, a separate
+  Windows-to-USB frame transport, and a TomTom framebuffer receiver; none is
+  implemented by the current preview `.exe`.
+- On the owner PC, the Microsoft IDD sample compiled its UMDF driver DLL and
+  app and generated a catalog. Its staged x64 INF passed `InfVerif /u` with
+  exit code 0. The source template did not pass manual verification because
+  its `$ARCH$` and `DriverVer` placeholders are intended to be stamped during
+  build. This validates the basic sample toolchain only; no driver has been
+  installed and no TomTom-specific transport/receiver exists yet.
+- An experimental standalone C89 receiver and fixed 320x240 RGB565 frame
+  protocol are now implemented and ARM-buildable. The receiver is not
+  installed or supervised by device startup, and must not run alongside the
+  gallery renderer because both use `/dev/fb0`. The native Studio tree now has
+  a BGRA8-to-RGB565 converter and a bounded USB-only TCP sender worker; it
+  keeps only the latest pending frame, limits delivery to 10 fps, waits for
+  validated ACKs, and sleeps/disconnects while idle. Host tests cover the
+  protocol, conversion, and worker lifecycle. The WDK-specific IDD source now
+  wires its active swap-chain frames to that sender; the WDK build and physical
+  end-to-end test remain outstanding.
+- An experimental WDK-specific IDD project now advertises one 320x240 mode,
+  rate-limits D3D staging/readback and conversion to 10 fps, and feeds the
+  bounded sender only while IddCx has assigned an active swap chain. A
+  temporary software-device create/close utility is included. Neither project
+  has been installed. The owner Windows WDK 10.0.26100 build has now compiled
+  and linked the IDD DLL and control utility, and generated a signed catalog.
+  Automatic InfVerif still reports the known missing x86 verifier DLL even
+  though signability/catalog generation completes. The owner manually ran the
+  installed x64 InfVerif `/u` on the staged INF and it exited 0. This validates
+  INF syntax only; runtime behavior and installation remain untested.
+  SignTool confirmed the DLL is present in the generated catalog, but `/kp`
+  verification fails because the local `WDKTestCert Sepiso Toni` root is not
+  trusted. This is expected for an untrusted test certificate, not a trusted
+  production signature. Do not install or enable test-signing on the daily PC.

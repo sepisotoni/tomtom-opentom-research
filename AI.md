@@ -7,6 +7,12 @@ task-specific source, tests, and detailed operations documents.
 
 - Desktop authoring, package schema, canvas, export, or gallery:
   `studio/`, root `test_*.py`, and [`DOCS_FACE_STUDIO.md`](DOCS_FACE_STUDIO.md).
+- Native Windows Face Studio:
+  `face-studio-native/` and [`face-studio-native/README.md`](face-studio-native/README.md).
+  This C++17/Win32 app is distinct from the Python reference implementation.
+- Feature planning for the PC app or TomTom display:
+  [`FEATURES_FOR_REVIEW.md`](FEATURES_FOR_REVIEW.md). A real extended monitor
+  is not implemented by the current Face Studio executable.
 - Live graphical face preview, fonts, weather card, notification animation:
   `watchface-research/preview/live_watchface.c`,
   `watchface-research/preview/info_anim/`, and
@@ -28,6 +34,8 @@ task-specific source, tests, and detailed operations documents.
 2. Confirm which executable or service owns the behavior. In particular,
    `live_watchface.c` and the packaged runtime in
    `watchface-research/project/applications/src/tools/` are separate.
+   The Python and native Face Studio apps are separate implementations too;
+   use the native app's own build/tests when changing `face-studio-native/`.
 3. Inspect current Git changes and preserve unrelated work.
 4. For device tasks, read [`docs/DEVICE_OPERATIONS.md`](docs/DEVICE_OPERATIONS.md)
    and [`docs/DEVICE_STORAGE.md`](docs/DEVICE_STORAGE.md) before connecting,

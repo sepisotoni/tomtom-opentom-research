@@ -18,6 +18,32 @@ python3 test_weather_cache.py
 Build a standalone executable with `python3 build_studio.py`. The result is
 host-specific; build on Windows to produce a Windows `.exe`.
 
+### Native Windows Face Studio
+
+`face-studio-native/` builds a self-contained Win32 `.exe`. On Linux with
+MinGW-w64 and CMake installed:
+
+```sh
+cmake -S face-studio-native -B build/native-face-studio-windows \
+  -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/face-studio-native/cmake/mingw-w64-x86_64.cmake"
+cmake --build build/native-face-studio-windows --parallel 4
+```
+
+The resulting `TomTomFaceStudio.exe` is a Windows binary even though it was
+cross-compiled on Linux. Run the portable core tests natively with:
+
+```sh
+cmake -S face-studio-native -B build/native-face-studio-host \
+  -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DFACESTUDIO_BUILD_APP=OFF
+cmake --build build/native-face-studio-host --parallel 4
+ctest --test-dir build/native-face-studio-host --output-on-failure
+```
+
+This host test does not launch or verify the Win32 GUI. For Windows build
+details, CI artifacts, and known parity differences, see
+[`face-studio-native/README.md`](../face-studio-native/README.md).
+
 ## Preview artwork and parser tests
 
 ```sh
@@ -80,6 +106,32 @@ The matching daemon sources are:
 
 Compile from a working directory where the relative source paths above exist
 (or use repository-root absolute paths).
+
+### Experimental display receiver
+
+The frame protocol, BGRA-to-RGB565 converter, and sender-worker lifecycle can
+be checked on the host through the native Studio CMake test targets
+`display_protocol_tests`, `display_frame_converter_tests`, and
+`display_frame_transport_tests`. These tests do not require a TomTom or prove
+live USB-network connectivity. Build the standalone receiver for the TomTom
+only with the matching legacy ARM compiler and kernel headers:
+
+```sh
+ARM_GCC=/path/to/OpenTom/gcc-3.3.4_glibc-2.3.2/bin/arm-linux-gcc
+KERNEL=/path/to/linux-s3c24xx
+DISPLAY_SRC=watchface-research/project/src/opentom_skel/bin
+"$ARM_GCC" -std=gnu89 -Wall -W -Werror -O2 \
+  -I"$KERNEL/include" \
+  "$DISPLAY_SRC/tomtom-display-receiver.c" \
+  "$DISPLAY_SRC/tomtom-display-protocol.c" \
+  -o /tmp/tomtom-display-receiver
+```
+
+This binary is experimental and not wired into startup. It writes to `/dev/fb0`
+and will conflict with the running watchface; do not launch it without an
+explicit display test and a verified way to restore the normal renderer. Its
+protocol is limited to 320x240 RGB565 frames (153,600 bytes each), USB-subnet
+peers, bounded socket timeouts, and at most 10 frames/second.
 
 ## Host relay and weather service
 

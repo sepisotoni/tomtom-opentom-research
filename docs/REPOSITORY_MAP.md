@@ -10,6 +10,8 @@ the repository root.
 - `AI.md`, `CLAUDE.md`, `Claude.md`: AI-agent navigation and instructions.
 - `DOCS_FACE_STUDIO.md`: desktop editor workflow and `.ttface` interchange
   contract.
+- `FEATURES_FOR_REVIEW.md`: current app feature inventory and the still-open
+  design choice for using the TomTom as a PC display.
 - `run_studio.sh`, `build_studio.py`: launch and package the desktop editor.
 - `test_studio.py`, `test_ttface_package.py`, `test_gallery_package.py`,
   `test_device_control.py`, `test_weather_cache.py`: desktop/package/service
@@ -30,6 +32,18 @@ the repository root.
 - `core/weather.py`: desktop-side weather helpers and simulation.
 
 See `DOCS_FACE_STUDIO.md` for usage and the package contract.
+
+## `face-studio-native/` — standalone Windows Face Studio
+
+- `src/app/main.cpp`: native Win32 editor and device-control UI.
+- `src/core/`: shared C++17 canvas, rendering, package/gallery IO, validation,
+  and bounded USB control client.
+- `tests/`: native core/device protocol tests and Python parity checker.
+- `README.md`: features, security limits, Windows/MinGW build, and current
+  differences from the Python reference app.
+
+The native app is a separate implementation. Build and validate it on its own;
+do not infer that the older Python UI or a Linux ELF build is the Windows `.exe`.
 
 ## `watchface-research/` — OpenTom and preview research
 

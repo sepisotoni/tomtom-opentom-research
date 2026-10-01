@@ -15,15 +15,21 @@ map below before changing or installing anything.
 | See the last verified state and outstanding device work | [Current status](docs/CURRENT_STATUS.md) |
 | Connect to, transfer files to, deploy, or inspect the TomTom | [Device operations](docs/DEVICE_OPERATIONS.md) |
 | Keep device storage bounded and manage rollback files | [Device storage policy](docs/DEVICE_STORAGE.md) |
+| Review experimental PC-to-TomTom display framing and safety constraints | [Display stream prototype](docs/DISPLAY_STREAM.md) |
 | Work on the embedded visual preview | [Preview guide](watchface-research/preview/README.md) and [visual handoff](watchface-research/preview/VISUAL_DESIGN_HANDOFF.md) |
 | Run or change the desktop editor | [Face Studio guide](DOCS_FACE_STUDIO.md) |
 | Deploy the host weather relay | [Relay guide](tomtom-relay/README.md) |
 | Configure the Google Weather API service | [Weather service guide](weather-service/README.md) |
+| Build the standalone native Windows Face Studio | [Native Studio guide](face-studio-native/README.md) |
+| Review the requested feature scope before implementation | [Feature draft](FEATURES_FOR_REVIEW.md) |
 | Give an AI coding agent repository context | [AI.md](AI.md), [CLAUDE.md](CLAUDE.md), or [Claude.md](Claude.md) |
 
 ## Main components
 
 - `studio/` is the Python/PyQt desktop Face Studio and package tooling.
+- `face-studio-native/` is the native C++17/Win32 Face Studio on the
+  `native-face-studio` branch. It is a standalone Windows executable and is
+  being reviewed separately from the Python reference app.
 - `watchface-research/preview/` is the C89 Nano-X preview/gallery renderer.
   Its `live_watchface.c` is not the packaged-face runtime.
 - `watchface-research/project/` contains OpenTom application, kernel, startup,
@@ -48,6 +54,11 @@ python3 test_weather_cache.py
 python3 -m unittest watchface-research/project/tests/test_convert_icon.py
 cargo test --manifest-path tomtom-relay/Cargo.toml
 ```
+
+For the native Windows app and its host-portable core, use the build commands
+in [`face-studio-native/README.md`](face-studio-native/README.md). Linux can
+cross-compile the Windows `.exe` with MinGW-w64; that does not verify GUI
+behavior on physical Windows.
 
 The embedded renderer's exact ARM build additionally requires the OpenTom ARM
 GCC 3.3.4 compiler, Nano-X headers/library, and matching kernel headers; see
