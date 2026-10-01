@@ -93,11 +93,14 @@ connection refused, connect timeout, exact bytes on the wire for `PING` / `STATU
 
 ## Footprint
 
-* Measured here (MinGW-w64 cross build, `-Os`, stripped, static libstdc++/libgcc): **474,112 bytes (463 KiB)**.
-  Imports only system DLLs: `KERNEL32`, `USER32`, `GDI32`, `COMCTL32`, `COMDLG32`, `OLE32`, `WS2_32` and the OS `msvcrt`
-  (WIC is reached through COM, so there is no import for it).
-* The MSVC size and the idle memory on real Windows are printed by the CI job summary (Wine RSS is not representative).
-* Unavoidable footprint: WIC is used for JPEG decoding (writing a JPEG decoder would add code and risk for no benefit).
+Measured on the GitHub Actions `windows-latest` runner (MSVC, Release, `/MT`, `/O1`, LTCG), run
+[36858597138](https://github.com/sepisotoni/tomtom-opentom-research/actions/runs/36858597138):
+
+* `TomTomFaceStudio.exe`: **500,736 bytes (489 KiB)**; the uploaded artifact zip is 252,590 bytes.
+* Imports only OS DLLs: `USER32`, `GDI32`, `COMCTL32`, `COMDLG32`, `ole32`, `WS2_32`, `KERNEL32` — no VC++ redistributable, no runtime to install.
+* Idle, 8 s after launch with the window open and the 1 Hz live preview running: **working set 19.1 MiB, private bytes 3.8 MiB**.
+* The MinGW-w64 cross build used during development is 474,112 bytes (463 KiB).
+* The only footprint that is not ours: JPEG/PNG/BMP decoding goes through the OS Windows Imaging Component (reached via COM, so it adds no import and no code to the exe).
 
 ## Not ported / differences (deliberate, please review)
 
