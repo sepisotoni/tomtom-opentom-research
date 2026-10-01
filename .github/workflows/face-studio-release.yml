@@ -70,7 +70,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Tagged commit $env:GITHUB_SHA is not on main; merge it first, then re-tag." }
 
       - name: Configure
-        run: cmake -S face-studio-native -B build -A x64 -DFACESTUDIO_VERSION=${{ steps.meta.outputs.version }} -DFACESTUDIO_VERSION_LABEL=${{ steps.meta.outputs.label }}
+        shell: pwsh
+        run: |
+          cmake -S face-studio-native -B build -A x64 "-DFACESTUDIO_VERSION=${{ steps.meta.outputs.version }}" "-DFACESTUDIO_VERSION_LABEL=${{ steps.meta.outputs.label }}" 2>&1 | Tee-Object -FilePath configure.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $errs = Get-Content configure.log | Select-Object -Last 25
+            Write-Host "::error title=Configure failed::$($errs -join '%0A')"
+          }
+          exit $code
 
       - name: Build (Release)
         shell: pwsh
