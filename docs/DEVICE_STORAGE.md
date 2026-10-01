@@ -75,11 +75,17 @@ commands. Do not rely on GNU options on the device.
   `~/Downloads/TomTom-weather-compact-map-logo-20261001T0349.png`.
 - A single pre-install renderer rollback was added as
   `watchface.new.before-compact-maps-logo-20261001T034838`.
-- Earlier iterations had many dated `watchface.new.before-*` binaries in the
-  same gallery directory. They were not archived or deleted in that session.
-- A later connection attempt found no route to the device, so those older
-  backups were not cleaned up. Reconnect and inspect/verify them before cleanup;
-  do not assume this historical file list is still current.
-
-No device cleanup is complete until the safe cleanup sequence is carried out
-while the SD card is accessible.
+- The 38 dated `watchface.new.before-*` binaries were archived to
+  `/home/sepisotoni/TomTomBackups/20261001-device-cleanup/` outside Git. Their
+  filenames and sizes were compared against the live device FTP inventory;
+  per-file SHA-256 digests are in `SHA256SUMS.tsv`.
+- 37 obsolete backups were removed using exact paths. The sole on-device
+  rollback retained is
+  `watchface.new.before-compact-maps-logo-20261001T034838`.
+- The renderer remained running as PID 326; `STATUS` returned `OK FACE 8` and
+  the log continued to report direct 320x240 RGB565 framebuffer presentation.
+- Free space increased from 448,196 KiB to 449,980 KiB. The temporary
+  USB-only read-only FTP server and its log were removed.
+- The USB interface was physically present but down, and its USB path differed
+  from the saved systemd profile. The host used a temporary link/address/route
+  for cleanup; no persistent network profile was installed or changed.

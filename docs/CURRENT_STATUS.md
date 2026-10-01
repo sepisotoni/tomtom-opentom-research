@@ -41,19 +41,29 @@ These are historical observations; the weather response is not current weather.
 No GPS coordinates, API tokens, or raw weather payloads belong in this status
 file.
 
-## Outstanding device storage work
+## Device storage cleanup (2026-10-01)
 
-The prior gallery directory held numerous dated `watchface.new.before-*`
-executables. They were not copied off-device or deleted. A later check found
-the TomTom unreachable from the Linux host (`No route to host`), so no cleanup
-was completed in that session.
+The TomTom USB Ethernet gadget appeared as `enx9ec66eaa84f0`, but its current
+USB port did not match the checked-in persistent network profile. Rather than
+installing a mismatched permanent profile, the host brought up that verified
+USB interface and added a temporary `/32` route to the TomTom.
 
-When the direct USB link is available again, inspect the SD card, archive and
-verify older rollback executables on host storage outside Git, retain one
-known-good device rollback, remove only exact verified obsolete files, and
-recheck free space and runtime. Follow
-[`DEVICE_STORAGE.md`](DEVICE_STORAGE.md). Never infer cleanup from a command
-that ran while the target was unavailable.
+- Archived all **38** dated `watchface.new.before-*` binaries to
+  `/home/sepisotoni/TomTomBackups/20261001-device-cleanup/`, outside Git.
+- Verified every archived filename and byte size against the live device FTP
+  inventory; saved per-file SHA-256 values in `SHA256SUMS.tsv`.
+- Removed the 37 obsolete device backups using explicit file paths, keeping
+  only `watchface.new.before-compact-maps-logo-20261001T034838` as the rollback.
+- Stopped the temporary USB-only read-only FTP server and removed its device
+  log.
+- Verified `watchface.new` remains running (PID 326), `OK FACE 8`, and the
+  renderer log still reports `DIRECT_FB=320x240 RGB565 stride=640 offset=0,0`.
+- SD free space increased from 448,196 KiB to 449,980 KiB.
+
+The archive contains the original dated backups even though only one rollback
+remains on the device. The temporary host USB address is not persistent; if the
+device becomes unreachable again, rediscover the USB interface and route rather
+than using the possibly mismatched systemd network profile.
 
 ## Recent local validation
 
