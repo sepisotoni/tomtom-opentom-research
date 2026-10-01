@@ -81,9 +81,10 @@ mapping or a live PC-to-TomTom TCP connection.
 
 ## Remaining path to a true extended monitor
 
-1. Review the generated package artifacts and test-signing state; staged x64
-   INF passed `InfVerif /u`, but this does not validate runtime behavior or
-   signing trust.
+1. Verify the generated catalog signature and the DLL's membership in it with
+   SignTool; PowerShell currently reports `UnknownError` for both files. The
+   staged x64 INF passed `InfVerif /u`, but that does not establish signing
+   trust or runtime behavior.
 2. Only after review, validate the temporary software-device control app on a
    Windows test system and test protocol traffic over USB.
 3. Build the TomTom receiver for the exact target headers and check its

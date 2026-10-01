@@ -138,5 +138,7 @@ card-local layout with the info panel open.
   Automatic InfVerif still reports the known missing x86 verifier DLL even
   though signability/catalog generation completes. The owner manually ran the
   installed x64 InfVerif `/u` on the staged INF and it exited 0. This validates
-  INF syntax only; runtime behavior, signing trust, and installation remain
-  untested.
+  INF syntax only; runtime behavior and installation remain untested.
+  PowerShell reports `UnknownError` for the generated catalog and DLL signed
+  by the local `WDKTestCert Sepiso Toni` certificate; its trust/verification
+  status has not been established, so do not install the package.
