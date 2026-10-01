@@ -81,10 +81,11 @@ mapping or a live PC-to-TomTom TCP connection.
 
 ## Remaining path to a true extended monitor
 
-1. Build the new WDK-specific `face-studio-native/windows-idd/TomTomIdd.sln`
-   with VS 2022 and review compiler/INF-verifier output; it is not yet validated.
-2. Only after a clean build and review, validate the temporary software-device
-   control app on a Windows test system, then test protocol traffic over USB.
+1. Manually validate the staged IDD INF with x64 `InfVerif`; the first WDK build
+   compiled/linked and generated its catalog, but automatic INF verification
+   raised the known missing x86 verifier DLL exception.
+2. Review the verified package, then validate the temporary software-device
+   control app on a Windows test system and test protocol traffic over USB.
 3. Build the TomTom receiver for the exact target headers and check its
    reported framebuffer mode before any deployment.
 4. Stop the watchface supervisor in a reversible, documented manner for a

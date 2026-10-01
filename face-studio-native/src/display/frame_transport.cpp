@@ -32,7 +32,7 @@ namespace {
 constexpr char kTomTomUsbAddress[] = "192.168.101.115";
 constexpr unsigned short kTomTomDisplayPort = 18745;
 constexpr int kIoTimeoutMs = 2000;
-constexpr auto kFrameInterval = std::chrono::milliseconds(100);
+constexpr auto kFrameInterval = std::chrono::milliseconds(110);
 constexpr auto kIdleDisconnect = std::chrono::seconds(5);
 
 #ifdef _WIN32

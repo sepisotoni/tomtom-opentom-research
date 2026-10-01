@@ -133,5 +133,8 @@ card-local layout with the info panel open.
   rate-limits D3D staging/readback and conversion to 10 fps, and feeds the
   bounded sender only while IddCx has assigned an active swap chain. A
   temporary software-device create/close utility is included. Neither project
-  has been built with the Windows WDK or installed; local MinGW cannot validate
-  IddCx/INF APIs.
+  has been installed. The owner Windows WDK 10.0.26100 build has now compiled
+  and linked the IDD DLL and control utility, and generated a signed catalog.
+  Automatic InfVerif still reports the known missing x86 verifier DLL even
+  though signability/catalog generation completes; separately verify the
+  staged INF with the installed x64 InfVerif before considering installation.

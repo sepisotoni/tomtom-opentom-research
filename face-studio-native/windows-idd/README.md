@@ -18,8 +18,12 @@ removing the software device. It is for development only, not an installer or
 the finished Studio integration.
 
 The source follows the documented IddCx callback pattern and does not include
-Microsoft sample source. The Windows WDK build is required to validate the
-IddCx callback/API version and INF packaging. No driver has been installed.
+Microsoft sample source. The Windows WDK 10.0.26100 build compiled and linked
+the driver DLL, control utility, and generated a driver catalog. The build's
+automatic `InfVerif` invocation reported that it could not load
+`x86\InfVerif.dll`; MSBuild nevertheless completed signability/catalog work
+with no listed signing errors. The staged INF still needs separate manual
+x64 `InfVerif` validation. No driver has been installed.
 
 ## Build on Windows
 
