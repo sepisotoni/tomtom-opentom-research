@@ -63,6 +63,10 @@ IDDCX_TARGET_MODE make_target_mode() noexcept {
     return mode;
 }
 
+}  // namespace
+
+namespace tt::idd {
+
 class Direct3DDevice {
 public:
     explicit Direct3DDevice(LUID adapter_luid) : adapter_luid_(adapter_luid) {}
@@ -295,7 +299,7 @@ private:
     tt::display::FrameTransport transport_;
 };
 
-}  // namespace
+}  // namespace tt::idd
 
 namespace tt::idd {
 
