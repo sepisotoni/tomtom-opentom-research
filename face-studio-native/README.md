@@ -78,6 +78,23 @@ The Windows workflow `.github/workflows/face-studio-native.yml` builds with MSVC
 tests, prints the size / imported DLLs / idle memory to the job summary and uploads
 `TomTomFaceStudio.exe` as the **`TomTomFaceStudio-win-x64`** workflow artifact. No binaries are committed.
 
+## Releases
+
+Pushing a version tag builds the app and publishes it as a GitHub Release automatically
+(`.github/workflows/face-studio-release.yml`):
+
+```sh
+git tag v1.2.0
+git push origin v1.2.0        # stable release
+git tag v1.2.0-rc1 && git push origin v1.2.0-rc1   # marked as a pre-release
+```
+
+* The tag must look like `vMAJOR.MINOR.PATCH` (optionally `-suffix`) and the tagged commit must already be on `main`.
+* The workflow builds with MSVC, runs `facestudio_tests.exe`, stamps the version into the exe's file properties, and attaches
+  `TomTomFaceStudio-<tag>-win-x64.exe` plus `SHA256SUMS.txt`. Release notes are generated from the commits since the previous release.
+* Run it by hand from the Actions tab ("Release - Native Face Studio") to try it out: a manual run creates a **draft** release by default.
+* The exe is not code-signed, so SmartScreen may warn on first run.
+
 ## Tests
 
 | Suite | Command |

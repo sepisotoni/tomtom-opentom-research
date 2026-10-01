@@ -1,0 +1,146 @@
+name: Release - Native Face Studio (Windows x64)
+
+# Publishing a release:
+#   git tag v1.2.0 && git push origin v1.2.0          (stable)
+#   git tag v1.2.0-rc1 && git push origin v1.2.0-rc1  (marked as a pre-release)
+# The tagged commit must already be on main. You can also run this workflow by hand
+# from the Actions tab; a manual run creates a DRAFT release by default.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create, e.g. v1.2.0 or v1.2.0-rc1"
+        required: true
+        type: string
+      draft:
+        description: "Create as a draft (invisible to others until you publish it)"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and test (MSVC, x64)
+    runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and version
+        id: meta
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG } else { $env:GITHUB_REF_NAME }
+          if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.]+)?$') {
+            throw "Tag '$tag' must look like v1.2.3 or v1.2.3-rc1"
+          }
+          $version = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+          $label = $tag.Substring(1)
+          $pre = if ($Matches[4]) { 'true' } else { 'false' }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "label=$label" >> $env:GITHUB_OUTPUT
+          "prerelease=$pre" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing $tag (version $version, prerelease=$pre)"
+
+      - name: Require the tagged commit to be on main
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Tagged commit $env:GITHUB_SHA is not on main; merge it first, then re-tag." }
+
+      - name: Configure
+        run: cmake -S face-studio-native -B build -A x64 -DFACESTUDIO_VERSION=${{ steps.meta.outputs.version }} -DFACESTUDIO_VERSION_LABEL=${{ steps.meta.outputs.label }}
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: build\Release\facestudio_tests.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          $name = "TomTomFaceStudio-${{ steps.meta.outputs.tag }}-win-x64.exe"
+          Copy-Item build\Release\TomTomFaceStudio.exe "dist\$name"
+          $hash = (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii dist\SHA256SUMS.txt
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          DRAFT: ${{ github.event.inputs.draft }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          cat > notes.md <<'NOTES'
+          **TomTom Face Studio (native Windows x64)** - a single `.exe`, nothing to install.
+
+          - Verify the download with `SHA256SUMS.txt` (`certutil -hashfile <exe> SHA256`).
+          - The executable is **not code-signed**, so Windows SmartScreen may warn on first run.
+          - The Device tab talks to the TomTom's unencrypted, unauthenticated control service. Keep the TomTom on a direct
+            USB link; never bridge or expose that connection to Wi-Fi or the internet.
+
+          ---
+          NOTES
+
+          args=(--title "TomTom Face Studio $TAG" --notes-file notes.md --generate-notes)
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            args+=(--target "$GITHUB_SHA")
+            if [ "$DRAFT" = "true" ]; then args+=(--draft); fi
+          else
+            args+=(--verify-tag)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists - replacing its assets."
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* "${args[@]}"
+          fi
+          gh release view "$TAG" --json url,isDraft,isPrerelease,assets \
+            --jq '"\(.url)  draft=\(.isDraft) prerelease=\(.isPrerelease) assets=\([.assets[].name] | join(", "))"' | tee -a "$GITHUB_STEP_SUMMARY"
