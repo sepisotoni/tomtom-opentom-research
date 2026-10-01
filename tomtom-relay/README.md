@@ -16,9 +16,10 @@ forward, or expose the USB link to Wi-Fi or the internet.
 - The service does not discover GPS coordinates. The TomTom GPS data path has
   not yet been validated; a GPS fix must be supplied to the weather endpoint
   by a trusted client after the user grants location consent.
-- The current watchface renderer does not yet call this service for weather.
-  TomTom's BusyBox `wget` was verified to fetch health/status and stored assets
-  over the USB link; this proves network reachability, not a GPS/weather client.
+- The device weather worker sends an explicitly consented GPS fix to
+  `/v1/weather/display`; the relay returns a compact no-store summary. The
+  Roboto watchface requests a validated Google PNG icon over USB only when its
+  icon key changes. Icon responses are size/dimension bounded and not cached.
 - The deployed Render weather API requires `WEATHER_SERVICE_TOKEN`. Until it
   is configured locally, the relay returns
   `503 weather_proxy_not_configured`; it never pretends that weather works.
@@ -39,6 +40,8 @@ Default address: `192.168.101.114:18744` on the direct USB Ethernet link.
 | `PUT /v1/files/<name>` | Atomically stores an asset (maximum 32 MiB) |
 | `DELETE /v1/files/<name>` | Deletes an asset |
 | `POST /v1/weather` | Forwards an explicitly consented coordinate request to Render |
+| `POST /v1/weather/display` | Returns the bounded `TMW2` current/high/low/icon summary for the device |
+| `GET /v1/weather/icon/<key>_dark.png` | Proxies a validated Google weather PNG without caching |
 
 Asset names are single safe path components. The service does not accept
 directories, traversal, symlinks, or unbounded uploads. If

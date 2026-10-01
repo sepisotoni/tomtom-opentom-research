@@ -82,7 +82,6 @@ if [ -x "$DIST/bin/tomtom-control" ] &&
 	! pidof tt-control >/dev/null 2>&1; then
 	"$DIST/bin/tomtom-control" >>"$DIST/logs/tomtom-control.log" 2>&1 &
 fi
-
 # Start the Global Locate daemon for devices with the integrated GPS receiver.
 if [ -r /proc/barcelona/gldetected ] &&
 	[ "`cat /proc/barcelona/gldetected`" = "1" ] &&
@@ -91,13 +90,29 @@ if [ -r /proc/barcelona/gldetected ] &&
 	rc.gltt start 115200 >> "$DIST/logs/gps-start.log" 2>&1
 fi
 
-# Suspend when the power button is pressed or the battery is low
-power_button -b bin/suspend bin/suspend &
+if [ -x "$DIST/bin/weather-sync" ] &&
+	! pidof weather-sync >/dev/null 2>&1; then
+	"$DIST/bin/weather-sync" >>"$DIST/logs/weather-sync.log" 2>&1 &
+fi
+
+start_power_button()
+{
+	"$DIST/bin/power_button" -d "$DIST/etc/power-button.cfg" \
+		>>"$DIST/logs/power-button.log" 2>&1
+	if [ "$?" -ne 0 ]; then
+		echo "Falling back to legacy power-button handling" \
+			>>"$DIST/logs/power-button.log"
+		"$DIST/bin/power_button" -b bin/suspend bin/suspend \
+			>>"$DIST/logs/power-button.log" 2>&1
+	fi
+}
+
+start_power_button &
 
 while /bin/true
 do
 	sleep 1
-	pidof nano-X || {
+	pidof nano-X >/dev/null 2>&1 || {
 		nice -n -10 nano-X &
 		nanowm &
 		sleep 2
@@ -109,6 +124,13 @@ do
 	if [ -x "$DIST/bin/tomtom-control" ] &&
 		! pidof tt-control >/dev/null 2>&1; then
 		"$DIST/bin/tomtom-control" >>"$DIST/logs/tomtom-control.log" 2>&1 &
+	fi
+	if [ -x "$DIST/bin/weather-sync" ] &&
+		! pidof weather-sync >/dev/null 2>&1; then
+		"$DIST/bin/weather-sync" >>"$DIST/logs/weather-sync.log" 2>&1 &
+	fi
+	if ! pidof power_button >/dev/null 2>&1; then
+		start_power_button &
 	fi
 	if ! pidof watchface.new >/dev/null 2>&1; then
 		"$DIST/bin/watchface-main" >>"$DIST/logs/watchface.log" 2>&1 &

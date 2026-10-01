@@ -17,50 +17,103 @@ does not install or select a persistent face.
   `~/Downloads/TomTom-Fonts/`; the font binaries are not copied into this repo.
 - `digit-atlas-roboto.pgm`, `digit-atlas-ubuntu.pgm`, and
   `digit-atlas-nunito.pgm` back selectable font faces (styles 6, 7, and 8).
-- The three font faces use a centered `HH` over `MM` layout, with an enlarged
-  hour-only view at `:00`. If real weather data becomes available, the time
-  moves into the right half and condition/temperature appear on the left.
-  Date, battery, and seconds remain ordinary details and do not trigger that
-  split. The preview currently has no weather provider, so it stays centered.
+- Ubuntu and Nunito use a centered `HH` over `MM` layout. Roboto (style 6)
+  shows `HH:MM` side-by-side while closed, then animates into two compact rows.
+  All three font faces shift the clock into a blue-outlined right panel as the
+  same weather card slides in on the left; the date hands off to the card's
+  upper left instead of crossing the clock. Expanded digits stay within and
+  are centered in a pure-black time panel. The battery moves to the info
+  card's upper-right; the weather icon sits by the temperature and uses the
+  Weather API icon when available, with a crisp native C-drawn fallback.
+  Red/blue maximum/minimum arrows are taller; precipitation is omitted.
+  Specific heat, cold, heavy-rain, storm, or snow alerts appear in a rounded
+  badge when active. High/low values appear only when supplied by the relay.
+  A small, aspect-preserving Google Maps logo sits at the card's bottom-left.
+  Dates on the font faces use the renderer's bitmap glyphs. The battery remains
+  in the time corner while closed and moves into the card when expanded. All
+  three font faces show an enlarged hour-only view at `:00`. Weather updates
+  never open the info panel automatically.
+- The font-face weather card is a virtual **138x230** layout. Its content is
+  positioned in card-local coordinates and scaled from that coordinate space,
+  not placed independently on the screen. The date follows the card's
+  top-left anchor; the battery owns a reserved upper-right slot, inset seven
+  virtual pixels from the card edge. When the card is fully open, the battery
+  remains 13 pixels clear of the blue time-panel divider. Weather, alert,
+  notification, mountain, and attribution elements use the same local layout
+  mapping, so moving or resizing the card moves/scales its contents together.
 - `live_watchface.c` is the Nano-X preview application. Tap the screen or send
-  `SIGUSR1` to cycle through the local styles; Numerals Duo is style 5.
-- `watchface.cfg` starts at Ubuntu and cycles only styles 5–8 (Numerals Duo,
-  Roboto, Ubuntu, and Nunito). `cycle_start` and `cycle_count` can limit cycling
-  to any contiguous range of styles available in the executable. Atlas paths
-  are relative to `artwork_dir`.
-The running preview accepts a face index from the USB-only `tt-control`
+  `SIGUSR1` to cycle face styles. Screen taps and `SIGUSR1` cycle the configured
+  range; `SIGUSR2` opens or closes the info panel. Numerals Duo is style 5.
+- `watchface.cfg` starts at Ubuntu and cycles styles 5–8 (Numerals Duo, Roboto,
+  Ubuntu, and Nunito).
+  `cycle_start` and `cycle_count` can limit cycling to any contiguous range of
+  styles available in the executable. Atlas paths are relative to `artwork_dir`.
+
+The font faces (styles 6–8) also accept WhatsApp-style placeholder
+notifications over the TomTom USB link: `OT1|N|15|Test message received`
+sent as UDP to port `45872`. A notification opens the info panel if needed,
+shows a chat icon and message in place of the weather content, then fades out
+over its final 1.5 seconds. Weather content returns after the notification has
+fully faded; the two contents are never cross-faded over one another. The
+message is limited to 32 printable ASCII characters and kept only in RAM.
+Packets from outside `192.168.101.0/24` are ignored; this event channel is
+unencrypted and is meant for the isolated USB connection, not an exposed
+network.
+
+For new icons and animation design, read
+[`VISUAL_DESIGN_HANDOFF.md`](VISUAL_DESIGN_HANDOFF.md). It documents the C89 /
+Nano-X constraints and the PNG-to-RGB565 sprite-header converter. The official
+Google Maps attribution logo source and generated device sprite are in
+`assets/google-maps-attribution/`.
+The `info_anim/` module is integrated into this renderer. A screen tap cycles
+the configured faces and closes any open info panel; `SIGUSR2` opens or closes
+the panel. Weather updates do not trigger animation. The required Google Maps
+logo attribution is wrapped inside the info panel, and clock seconds are
+suppressed during the transition to avoid drawing over the enlarged time. A quick
+power-button press also toggles the panel through the OS-side duration
+configuration (`<=250 ms` quick action; `251-399 ms` no action). Face selection
+is also available through Face Studio and `SIGUSR1`.
+The running preview accepts a face index from the USB-only `tomtom-control`
 service through `/mnt/sdcard/opentom/preview-gallery/current_face`; indices
 0–8 select the built-in styles and the four font/rounded styles. The service
-listens on `192.168.101.115:18743`, implements only `PING`, `STATUS`, and
-`SET_FACE <id>`, and is supervised by the device startup loop. Face selection
-is written atomically and retained across renderer restarts and device
-reboots. It does not provide a shell or general-purpose remote access.
+listens on `192.168.101.115:18743` and is supervised by the device startup
+loop. `PING`, `STATUS`, and `SET_FACE <id>` manage persistent face selection;
+`SET_WEATHER`, `WEATHER_STATUS`, and `CLEAR_WEATHER` manage only the current
+weather summary in RAM, including the current temperature, today's high/low,
+and a validated Google icon key. The icon PNG is fetched over USB only when
+the key changes (with a five-minute retry delay after failures), decoded in
+RAM, and never stored on the SD card. Face selection is written atomically and retained
+across renderer restarts and device reboots. The service does not provide a
+shell or general-purpose remote access.
 
 ### USB control service build and protocol
 
 Build the service using the same OpenTom ARM GCC 3.3.4 toolchain used for the
 watchface, then place the output at
-`opentom_skel/bin/tt-control` in the deployed TomTom filesystem:
+`/mnt/sdcard/opentom/bin/tomtom-control` in the deployed TomTom filesystem:
 
 ```sh
 arm-linux-gcc -Wall -W -Werror -O2 \
-  -o tt-control \
+  -o tomtom-control \
   watchface-research/project/src/opentom_skel/bin/tomtom-control.c
 ```
 
-The startup script requires the binary as
-`/mnt/sdcard/opentom/bin/tt-control` and starts it through `bin/tomtom-control`
-after assigning the USB address. It checks the process at startup and
-periodically while the UI is running, restarting an exited service. The daemon
-listens only on `192.168.101.115:18743`, serves one short request per TCP
-connection, rejects peers outside `192.168.101.0/24`, and bounds request size
-and receive time. Its plain-text protocol is:
+The startup script assigns the USB address, then starts the daemon as
+`bin/tomtom-control`; it checks the process at startup and periodically while
+the UI is running, restarting an exited service. The daemon listens on
+`0.0.0.0:18743` so both loopback and the USB interface work, but rejects
+non-loopback peers outside `192.168.101.0/24`. It serves one short request per
+TCP connection and bounds request size and receive time. Its plain-text
+protocol is:
 
 | Request | Response | Effect |
 |---|---|---|
 | `PING` | `OK TOMTOM_CONTROL 1` | Confirms the service is responsive |
 | `STATUS` | `OK FACE <id>` | Reads the persisted built-in face ID |
 | `SET_FACE <id>` | `OK FACE <id>` | Validates `0`–`8` and atomically saves the ID |
+| `SET_WEATHER <condition> <C> <alert> <precip> <noteworthy> <high> <low> <icon-key>` | `OK WEATHER` | Updates the RAM-only summary |
+| `WEATHER_STATUS` | `OK WEATHER ...` or `OK WEATHER NONE` | Reads the RAM-only summary |
+| `CLEAR_WEATHER` | `OK WEATHER CLEARED` | Clears the RAM-only summary |
 
 Invalid IDs and unsupported commands receive `ERR ...` responses. The daemon
 has no shell, file-path, or arbitrary command interface. On the connected
@@ -74,6 +127,16 @@ the Nano-X backbuffer at the device's native size. A separate scaled output
 buffer is allocated only if the window size differs. Seconds update only their
 small dirty regions; the base face is rebuilt on time-digit, face, battery, or
 date changes.
+
+An opt-in framebuffer experiment can be built with
+`-DWATCHFACE_DIRECT_FB -DWATCHFACE_PROFILE`. It validates the live framebuffer
+mode, reads each completed Nano-X backbuffer into RGB565, and copies it to the
+mapped framebuffer instead of calling `GrCopyArea`. This is a temporary
+presentation-path comparison, not the default: it still uses Nano-X for
+drawing and input, so it does not reduce software rasterization cost. The
+experimental binary exits if the framebuffer is not exactly 320x240 RGB565.
+The current TomTom installation can use `-DWATCHFACE_DIRECT_FB` without the
+profile flag when direct framebuffer presentation is desired.
 
 Regenerate the rounded glyph atlas on a desktop with Pillow installed:
 
@@ -109,15 +172,45 @@ Pass the optional atlases after the rounded atlas when launching the preview:
 The device build needs the TomTom ARM GCC 3.3.4 toolchain, Nano-X headers and
 library, and the matching Barcelona battery header. The toolchain and full
 OpenTom sysroot are external build inputs, not vendored in this repository.
-Compile against those inputs and write build products to a temporary or
-ignored build directory; do not commit device executables or deploy them as
-part of an artwork change.
+For this checkout, build the preview and its two companion daemons using the
+corresponding local input paths:
 
-Weather is not connected to a data source in this preview. Its weather state
-remains unavailable until the separate telemetry/data-source work is designed
-and implemented. Do not treat this visual preview as evidence of working
-weather data or package installation. The `MATERIAL_WEATHER_ICON_AUDIT.md`
-file inventories the related upstream icons and notes which weather conditions
-are not represented in Google's set. Selected source SVGs and the Apache-2.0
-license are kept in `assets/material-weather/`; the device preview does not yet
-render those SVGs or receive forecast data.
+```sh
+ARM_GCC=~/projects/tomtom-opentomresearch/OpenTom/gcc-3.3.4_glibc-2.3.2/bin/arm-linux-gcc
+NANOX=~/opentom-device-install/build/microwin
+KERNEL=~/opentom-device-install/src/linux-s3c24xx
+
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  -I"$NANOX/src/include" -I"$KERNEL/include" \
+  live_watchface.c info_anim/info_anim.c \
+  -L"$NANOX/src/lib" -lnano-X -lm \
+  -o /tmp/watchface-weather
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  ../project/src/opentom_skel/bin/tomtom-control.c \
+  -o /tmp/tomtom-control
+"$ARM_GCC" -Wall -W -Werror -O2 \
+  ../project/src/opentom_skel/bin/weather-sync.c \
+  -o /tmp/weather-sync
+```
+
+Use temporary or ignored build directories; do not commit generated device
+executables. `start.sh` starts the GPS daemon before `weather-sync`, then
+supervises both companion daemons. The worker accepts only checksum-valid RMC
+sentences with an active GPS fix, sends coordinates to the host relay with
+explicit location consent, and stores only the compact display summary in
+device RAM. If no valid fix arrives within 60 seconds, it uses the configured
+fallback in `project/src/opentom_skel/etc/weather-fallback-location.cfg`.
+The current coordinates approximate central Tzaneen; the Aqua Park entrance
+could not be verified from geocoding data. A valid GPS fix takes precedence.
+The worker makes at most one relay request per hour, including after an error
+or a rate-limit response. The renderer reads that RAM summary every 15
+seconds; this is a local cache refresh, not a weather-provider request. The
+relay returns a `no-store` summary; the renderer suppresses ordinary
+conditions and shows noteworthy precipitation, storms, or temperature
+extremes when the panel is opened by touch. The dedicated weather face uses
+the official Google weather PNG; the font-face info card uses that PNG when
+settled and native C-drawn symbols during transitions.
+The Material SVGs are references, not runtime assets. The
+`MATERIAL_WEATHER_ICON_AUDIT.md` file inventories related upstream icon
+references and licensing; selected SVGs and the Apache-2.0 license are kept
+in `assets/material-weather/`.

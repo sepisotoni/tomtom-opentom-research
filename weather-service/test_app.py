@@ -33,6 +33,7 @@ class GoogleWeatherProviderTests(unittest.TestCase):
                 "weatherCondition": {
                     "description": {"text": "Clear"},
                     "type": "CLEAR",
+                    "iconBaseUri": "https://maps.gstatic.com/weather/v1/clear_day",
                 },
             },
             {
@@ -54,6 +55,7 @@ class GoogleWeatherProviderTests(unittest.TestCase):
                         "daytimeForecast": {
                             "weatherCondition": {
                                 "description": {"text": "Cloudy"},
+                                "iconBaseUri": "https://maps.gstatic.com/weather/v1/cloudy",
                             }
                         },
                         "nighttimeForecast": {
@@ -98,9 +100,12 @@ class GoogleWeatherProviderTests(unittest.TestCase):
             self.assertEqual(query["location.latitude"], ["48.86"])
             self.assertEqual(query["location.longitude"], ["2.35"])
         self.assertEqual(result["current"]["temperature"], 18)
+        self.assertEqual(result["current"]["icon_key"], "clear_day")
         self.assertEqual(result["hourly"][0]["temperature"], 20)
         self.assertEqual(result["hourly"][0]["precipitation_probability"], 45)
         self.assertEqual(result["daily"][0]["condition"], "Cloudy")
+        self.assertEqual(result["daily"][0]["high"], 21)
+        self.assertEqual(result["daily"][0]["low"], 13)
         self.assertEqual(
             result["timezone_offset_minutes"],
             _timezone_offset_minutes(
@@ -131,7 +136,11 @@ class FakeProvider:
             "provider": "google_maps_weather",
             "fetched_at_utc": "2026-09-28T11:00:00Z",
             "timezone": "Europe/Paris",
-            "current": {"temperature": 18, "condition": "Clear"},
+            "current": {
+                "temperature": 18,
+                "condition": "Clear",
+                "icon_key": "clear_day",
+            },
             "hourly": [
                 {
                     "timestamp_utc": f"2026-09-28T{hour:02d}:00:00Z",
@@ -145,6 +154,8 @@ class FakeProvider:
                 {
                     "date": f"2026-09-{28 + day:02d}",
                     "condition": "x" * 32,
+                    "high": 21,
+                    "low": 12,
                 }
                 for day in range(7)
             ],

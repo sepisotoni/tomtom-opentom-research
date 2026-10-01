@@ -28,7 +28,18 @@
 #endif
 
 #define FACE_COUNT 9
-#define REQUEST_MAX 64
+#define REQUEST_MAX 128
+#define WEATHER_ICON_KEY_MAX 40
+
+static int weather_available;
+static int weather_condition;
+static int weather_temperature;
+static int weather_alert;
+static int weather_precipitation;
+static int weather_noteworthy;
+static int weather_high;
+static int weather_low;
+static char weather_icon_key[WEATHER_ICON_KEY_MAX] = "-";
 
 static volatile sig_atomic_t stopping;
 
@@ -110,6 +121,63 @@ read_face(void)
     return (int)face_id;
 }
 
+static int
+valid_weather_icon_key(const char *value)
+{
+    size_t i;
+
+    if (strcmp(value, "-") == 0)
+        return 1;
+    if (value[0] == '\0' || strlen(value) >= WEATHER_ICON_KEY_MAX)
+        return 0;
+    for (i = 0; value[i] != '\0'; ++i) {
+        if (!((value[i] >= 'a' && value[i] <= 'z') ||
+              (value[i] >= '0' && value[i] <= '9') ||
+              value[i] == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+static int
+parse_weather_values(const char *arguments, int *condition, int *temperature,
+                     int *alert, int *precipitation, int *noteworthy,
+                     int *high, int *low, char *icon_key)
+{
+    int consumed = 0;
+    int fields;
+
+    fields = sscanf(arguments, "%d %d %d %d %d %d %d %39s%n",
+                    condition, temperature, alert, precipitation,
+                    noteworthy, high, low, icon_key, &consumed);
+    if (fields == 8 && arguments[consumed] == '\0' &&
+        *condition >= 0 && *condition <= 6 &&
+        *temperature >= -100 && *temperature <= 100 &&
+        *alert >= 0 && *alert <= 5 &&
+        *precipitation >= 0 && *precipitation <= 100 &&
+        (*noteworthy == 0 || *noteworthy == 1) &&
+        *high >= -100 && *high <= 100 &&
+        *low >= -100 && *low <= 100 &&
+        *high >= *low && valid_weather_icon_key(icon_key))
+        return 1;
+
+    consumed = 0;
+    if (sscanf(arguments, "%d %d %d %d %d%n",
+                condition, temperature, alert, precipitation,
+                noteworthy, &consumed) != 5 ||
+        arguments[consumed] != '\0' ||
+        *condition < 0 || *condition > 6 ||
+        *temperature < -100 || *temperature > 100 ||
+        *alert < 0 || *alert > 5 ||
+        *precipitation < 0 || *precipitation > 100 ||
+        (*noteworthy != 0 && *noteworthy != 1))
+        return 0;
+    *high = *temperature;
+    *low = *temperature;
+    strcpy(icon_key, "-");
+    return 1;
+}
+
 static void
 handle_client(int client, const struct sockaddr_in *peer)
 {
@@ -127,7 +195,7 @@ handle_client(int client, const struct sockaddr_in *peer)
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
                sizeof(receive_timeout));
 
-    if ((address & mask) != usb_network) {
+    if (address != INADDR_LOOPBACK && (address & mask) != usb_network) {
         send_response(client, "ERR USB_ONLY\n");
         return;
     }
@@ -171,6 +239,60 @@ handle_client(int client, const struct sockaddr_in *peer)
         send_response(client, response);
         return;
     }
+    if (strncmp(request, "SET_WEATHER ", 12) == 0) {
+        int condition;
+        int temperature;
+        int alert;
+        int precipitation;
+        int noteworthy;
+        int high;
+        int low;
+        char icon_key[WEATHER_ICON_KEY_MAX];
+
+        if (!parse_weather_values(
+                request + 12, &condition, &temperature, &alert,
+                &precipitation, &noteworthy, &high, &low, icon_key)) {
+            send_response(client, "ERR INVALID_WEATHER\n");
+            return;
+        }
+        weather_condition = condition;
+        weather_temperature = temperature;
+        weather_alert = alert;
+        weather_precipitation = precipitation;
+        weather_available = 1;
+        weather_noteworthy = noteworthy;
+        weather_high = high;
+        weather_low = low;
+        strcpy(weather_icon_key, icon_key);
+        send_response(client, "OK WEATHER\n");
+        return;
+    }
+    if (strcmp(request, "WEATHER_STATUS") == 0) {
+        if (!weather_available) {
+            send_response(client, "OK WEATHER NONE\n");
+            return;
+        }
+        snprintf(response, sizeof(response),
+                 "OK WEATHER %d %d %d %d %d %d %d %s\n",
+                 weather_condition, weather_temperature, weather_alert,
+                 weather_precipitation, weather_noteworthy,
+                 weather_high, weather_low, weather_icon_key);
+        send_response(client, response);
+        return;
+    }
+    if (strcmp(request, "CLEAR_WEATHER") == 0) {
+        weather_available = 0;
+        weather_condition = 0;
+        weather_temperature = 0;
+        weather_alert = 0;
+        weather_precipitation = 0;
+        weather_noteworthy = 0;
+        weather_high = 0;
+        weather_low = 0;
+        strcpy(weather_icon_key, "-");
+        send_response(client, "OK WEATHER CLEARED\n");
+        return;
+    }
     if (strcmp(request, "STATUS") == 0) {
         int face_id = read_face();
         if (face_id < 0) {
@@ -208,7 +330,7 @@ main(void)
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
     address.sin_port = htons(TOMTOM_CONTROL_PORT);
-    address.sin_addr.s_addr = inet_addr(TOMTOM_CONTROL_BIND_ADDR);
+    address.sin_addr.s_addr = inet_addr("0.0.0.0");
     if (address.sin_addr.s_addr == INADDR_NONE ||
         bind(server, (struct sockaddr *)&address, sizeof(address)) != 0) {
         perror("tomtom-control: bind");

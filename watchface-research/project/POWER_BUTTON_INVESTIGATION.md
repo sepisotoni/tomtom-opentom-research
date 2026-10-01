@@ -59,11 +59,42 @@ If `GPIO_SHUTDOWN_TIMEOUT` is set to exactly 50 (10 seconds):
 
 *Caution: Do not apply or test kernel modifications on the physical TomTom without an accessible serial console (JTAG or debug header) and full backup of the rootfs/SD card.*
 
-1. **Step 1: Baseline Verification**:
-   Verify userland `/dev/hwstatus` polling with `/mnt/sdcard/opentom/bin/power_button`.
-2. **Step 2: Short-Press Rejection**:
-   Press power button for 1 second, 3 seconds, and 5 seconds. Verify screen stays on and no shutdown script is triggered.
-3. **Step 3: 9-Second Sustained Hold**:
-   Hold power button continuously with a stopwatch. Verify `ONOFF_MASK` triggers clean suspend/halt at ~9.0 seconds before PIC hard reset.
-4. **Step 4: Emergency 12-Second Hold on Freeze**:
-   Intentionally freeze user space (`killall -STOP init`) and hold power button for 12 seconds to confirm PIC suicide hardware safety net remains fully intact.
+1. **Baseline**: Confirm the saved `ttsystem`, startup script, and power-button
+   executable rollback copies are present before rebooting.
+2. **Quick action**: Press briefly and verify the user-space action log
+   reports a measured duration at or below 250 ms and the info panel
+   toggles. Allow for the GPIO sampler's approximately 20 ms resolution.
+3. **Unmapped interval**: A press reported from 251 through 399 ms should log
+   `action=none` and should not suspend.
+4. **Suspend action**: A press reported at 400 ms or longer runs the configured
+   suspend command on release. Test only when a wake/recovery path is known.
+5. **Hardware fallback**: The independent PIC cutoff remains at 10 seconds.
+   Do not deliberately test the emergency cutoff without a separate recovery
+   plan; it can remove power before user-space sync completes.
+
+## 4. Generic Press-Duration Event Interface
+
+The duration-aware implementation keeps gesture policy in user space:
+
+- The GPIO driver samples only the power-button input at 50 Hz (about 20 ms
+  resolution). Other GPIO status and the PIC fallback timer remain on their
+  original 5 Hz cadence.
+- On release, the driver latches a monotonically increasing event sequence and
+  measured duration in milliseconds. `IOR_BUTTON_EVENT` reads that record;
+  `ONOFF_MASK` remains a generic notification that a button press completed.
+- The kernel does not classify short, long, or double presses and does not
+  choose an action. `power_button` reads `etc/power-button.cfg`, reports the
+  measured duration in its log, and selects the configured user-space action.
+- The initial configuration assigns presses through 250 ms to the watchface
+  info-panel toggle, 251–399 ms to no action, and presses of 400 ms or longer
+  to the existing suspend action. Low-battery handling remains independent.
+- The hardware PIC reset path remains at 10 seconds. The regular GPIO status
+  scan, ignition timing, and dock power-cycle timing remain at their original
+  5 Hz cadence.
+
+The measured time is quantized by the 20 ms sample interval and can vary with
+switch bounce. Validate the short-press range on the physical unit before
+relying on it for other gestures. The OS-side thresholds and action paths can
+be changed in `/mnt/sdcard/opentom/etc/power-button.cfg` without rebuilding the
+kernel; send `SIGHUP` to `power_button` to reload the file without restarting
+the daemon.

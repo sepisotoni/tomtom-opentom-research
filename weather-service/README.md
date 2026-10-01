@@ -56,6 +56,11 @@ coordinates, authorization headers, and upstream URLs are never logged. The
 response includes current conditions, up to 24 hourly periods, and up to 7 daily
 condition summaries, and stays within 4 KiB. No coordinates or Google API key
 are returned.
+The current summary contains a validated Google weather icon key (the path
+component of Google's `iconBaseUri`); each daily summary includes its high and
+low temperature in Celsius. The TomTom USB relay converts those fields into
+its bounded `TMW2` device protocol and proxies the official dark-theme PNG icon
+from Google's fixed static host without caching or writing it to disk.
 The rounded coordinates are still sent to Google, so the explicit consent flag
 is required for each request.
 The response also includes the current location's `timezone` IANA ID and
@@ -72,9 +77,11 @@ logged or returned. The 4 KiB bound applies to the response payload, not
 permission to persist it. Check Google's current terms before changing this
 behavior.
 
-Display the exact attribution **“Source: Includes weather data from Google”**
-on or next to weather content. The caller must obtain consent before sending a
-device location; a false or absent consent flag is rejected.
+Display the official Google Maps logo on or next to the weather content; use
+the exact text **“Google Maps”** only when the logo cannot fit. The TomTom
+preview uses Google's official light-outline logo in its weather card. The
+caller must obtain consent before sending a device location; a false or absent
+consent flag is rejected.
 
 ### Error codes
 

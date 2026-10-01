@@ -16,6 +16,7 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_WEATHER_BYTES: usize = 1024;
 const MAX_ASSET_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 8192;
+const MAX_WEATHER_ICON_BYTES: u64 = 32 * 1024;
 const MAX_CLIENTS: usize = 8;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -81,6 +82,7 @@ fn status_reason(status: u16) -> &'static str {
         409 => "Conflict",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
         503 => "Service Unavailable",
         507 => "Insufficient Storage",
@@ -302,20 +304,85 @@ fn route_request(mut request: Request, config: &Config) -> Response {
         if request.method != "POST" {
             return json_error(405, "method_not_allowed");
         }
+        let mut reply;
         if content_type(&request) != Some("application/json") {
-            return json_error(415, "content_type_must_be_json");
+            reply = json_error(415, "content_type_must_be_json");
+        } else if let Some(length) = content_length(&request) {
+            if length == 0 || length > MAX_WEATHER_BYTES {
+                reply = json_error(413, "weather_request_size_invalid");
+            } else {
+                let mut body = vec![0; length];
+                if request.reader.read_exact(&mut body).is_err() {
+                    reply = json_error(400, "incomplete_request_body");
+                } else {
+                    reply = proxy_weather(&body, config);
+                }
+            }
+        } else {
+            reply = json_error(400, "content_length_required");
         }
-        let Some(length) = content_length(&request) else {
-            return json_error(400, "content_length_required");
+        reply.headers.push(("Cache-Control", "no-store".into()));
+        return reply;
+    }
+
+    if request.path == "/v1/weather/display" {
+        let reply = if request.method != "POST" {
+            json_error(405, "method_not_allowed")
+        } else if content_type(&request) != Some("application/json") {
+            json_error(415, "content_type_must_be_json")
+        } else if let Some(length) = content_length(&request) {
+            if length == 0 || length > MAX_WEATHER_BYTES {
+                json_error(413, "weather_request_size_invalid")
+            } else {
+                let mut body = vec![0; length];
+                if request.reader.read_exact(&mut body).is_err() {
+                    json_error(400, "incomplete_request_body")
+                } else {
+                    match proxy_weather(&body, config) {
+                        result if result.status == 200 => match summarize_weather(&result.body) {
+                            Ok(summary) => {
+                                let mut response = response(200, "OK", summary);
+                                response.content_type = "text/plain; charset=us-ascii";
+                                response
+                            }
+                            Err("weather_refresh_limited") => {
+                                json_error(429, "weather_refresh_limited")
+                            }
+                            Err(code) => json_error(502, code),
+                        },
+                        result => result,
+                    }
+                }
+            }
+        } else {
+            json_error(400, "content_length_required")
         };
-        if length == 0 || length > MAX_WEATHER_BYTES {
-            return json_error(413, "weather_request_size_invalid");
+        let mut reply = reply;
+        reply.headers.push(("Cache-Control", "no-store".into()));
+        return reply;
+    }
+
+    if let Some(icon_key) = request
+        .path
+        .strip_prefix("/v1/weather/icon/")
+        .and_then(|path| path.strip_suffix("_dark.png"))
+    {
+        if request.method != "GET" {
+            return json_error(405, "method_not_allowed");
         }
-        let mut body = vec![0; length];
-        if request.reader.read_exact(&mut body).is_err() {
-            return json_error(400, "incomplete_request_body");
-        }
-        return proxy_weather(&body, config);
+        let mut reply = match fetch_weather_icon(icon_key) {
+            Ok(body) => {
+                let mut reply = response(200, "OK", body);
+                reply.content_type = "image/png";
+                reply
+            }
+            Err(_) => json_error(502, "weather_icon_unavailable"),
+        };
+        reply
+            .headers
+            .push(("Cache-Control", "no-store, max-age=0".into()));
+        reply.headers.push(("Pragma", "no-cache".into()));
+        return reply;
     }
 
     if request.path == "/v1/files" {
@@ -707,7 +774,7 @@ fn call_weather_provider(payload: &str, token: &str, url: &str) -> Result<Vec<u8
     drop(body_file);
 
     let curl_config = format!(
-        "url = \"{}\"\nrequest = \"POST\"\nconnect-timeout = 5\nmax-time = 18\nmax-filesize = {}\nsilent = true\nshow-error = true\nfail = true\nheader = \"Authorization: Bearer {}\"\nheader = \"Content-Type: application/json\"\ndata-binary = \"@{}\"\n",
+        "url = \"{}\"\nrequest = \"POST\"\nconnect-timeout = 5\nmax-time = 18\nmax-filesize = {}\nsilent = true\nshow-error = true\nwrite-out = \"\\\\nTOMTOM_HTTP_STATUS:%{{http_code}}\"\nheader = \"Authorization: Bearer {}\"\nheader = \"Content-Type: application/json\"\ndata-binary = \"@{}\"\n",
         curl_escape(url),
         MAX_RESPONSE_BYTES,
         curl_escape(token),
@@ -730,10 +797,29 @@ fn call_weather_provider(payload: &str, token: &str, url: &str) -> Result<Vec<u8
     if !output.status.success() {
         return Err("weather_provider_unavailable");
     }
-    if output.stdout.len() > MAX_RESPONSE_BYTES as usize {
+    if output.stdout.len() > MAX_RESPONSE_BYTES as usize + 32 {
         return Err("weather_response_too_large");
     }
-    let body = output.stdout;
+    let text = std::str::from_utf8(&output.stdout).map_err(|_| "invalid_weather_response")?;
+    let Some((body_text, status_text)) = text.rsplit_once("\nTOMTOM_HTTP_STATUS:") else {
+        return Err("invalid_weather_response");
+    };
+    let status = status_text
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "invalid_weather_response")?;
+    if status != 200 {
+        return Err(match status {
+            400 | 403 => "weather_request_rejected",
+            401 => "weather_service_unauthorized",
+            429 => "weather_refresh_limited",
+            _ => "weather_provider_unavailable",
+        });
+    }
+    let body = body_text.as_bytes().to_vec();
+    if body.len() > MAX_RESPONSE_BYTES as usize {
+        return Err("weather_response_too_large");
+    }
     let text = std::str::from_utf8(&body).map_err(|_| "invalid_weather_response")?;
     if !text.starts_with('{')
         || !text.ends_with('}')
@@ -758,6 +844,322 @@ fn private_create(path: &Path) -> io::Result<File> {
 
 fn curl_escape(input: &str) -> String {
     input.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn json_object<'a>(input: &'a [u8], name: &str) -> Option<&'a [u8]> {
+    let key = format!("\"{name}\"");
+    let mut index = find_bytes(input, key.as_bytes())? + key.len();
+    skip_json_space(input, &mut index);
+    if input.get(index) != Some(&b':') {
+        return None;
+    }
+    index += 1;
+    skip_json_space(input, &mut index);
+    if input.get(index) != Some(&b'{') {
+        return None;
+    }
+    let start = index;
+    let end = json_container_end(input, start, b'{', b'}')?;
+    Some(&input[start..=end])
+}
+
+fn json_array<'a>(input: &'a [u8], name: &str) -> Option<&'a [u8]> {
+    let key = format!("\"{name}\"");
+    let mut index = find_bytes(input, key.as_bytes())? + key.len();
+    skip_json_space(input, &mut index);
+    if input.get(index) != Some(&b':') {
+        return None;
+    }
+    index += 1;
+    skip_json_space(input, &mut index);
+    if input.get(index) != Some(&b'[') {
+        return None;
+    }
+    let start = index;
+    let end = json_container_end(input, start, b'[', b']')?;
+    Some(&input[start..=end])
+}
+
+fn json_container_end(input: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, byte) in input.iter().copied().enumerate().skip(start) {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            value if value == open => depth += 1,
+            value if value == close => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn json_field<'a>(input: &'a [u8], name: &str) -> Option<&'a [u8]> {
+    let key = format!("\"{name}\"");
+    let mut index = find_bytes(input, key.as_bytes())? + key.len();
+    skip_json_space(input, &mut index);
+    if input.get(index) != Some(&b':') {
+        return None;
+    }
+    index += 1;
+    skip_json_space(input, &mut index);
+    let start = index;
+    match input.get(index)? {
+        b'"' => {
+            index += 1;
+            let mut escaped = false;
+            while let Some(byte) = input.get(index).copied() {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    return Some(&input[start..=index]);
+                }
+                index += 1;
+            }
+            None
+        }
+        _ => {
+            while input
+                .get(index)
+                .is_some_and(|byte| !b",}] \t\r\n".contains(byte))
+            {
+                index += 1;
+            }
+            (index > start).then_some(&input[start..index])
+        }
+    }
+}
+
+fn json_string_field(input: &[u8], name: &str) -> Option<String> {
+    let raw = json_field(input, name)?;
+    if raw.len() < 2 || raw.first() != Some(&b'"') || raw.last() != Some(&b'"') {
+        return None;
+    }
+    let value = &raw[1..raw.len() - 1];
+    if value.contains(&b'\\') {
+        return None;
+    }
+    std::str::from_utf8(value).ok().map(str::to_string)
+}
+
+fn json_number_field(input: &[u8], name: &str) -> Option<f64> {
+    let value = std::str::from_utf8(json_field(input, name)?).ok()?;
+    let number = value.parse::<f64>().ok()?;
+    number.is_finite().then_some(number)
+}
+
+fn valid_weather_icon_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn valid_weather_png(image: &[u8]) -> bool {
+    if image.len() < 24
+        || image.len() > MAX_WEATHER_ICON_BYTES as usize
+        || !image.starts_with(b"\x89PNG\r\n\x1a\n")
+        || &image[12..16] != b"IHDR"
+    {
+        return false;
+    }
+    let width = u32::from_be_bytes(image[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(image[20..24].try_into().unwrap());
+    (1..=128).contains(&width) && (1..=128).contains(&height)
+}
+
+fn fetch_weather_icon(icon_key: &str) -> Result<Vec<u8>, &'static str> {
+    if !valid_weather_icon_key(icon_key) {
+        return Err("invalid_weather_icon");
+    }
+    let url = format!("https://maps.gstatic.com/weather/v1/{icon_key}_dark.png");
+    let output = Command::new("curl")
+        .args([
+            "--disable",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "8",
+            "--max-filesize",
+            &MAX_WEATHER_ICON_BYTES.to_string(),
+            &url,
+        ])
+        .output()
+        .map_err(|_| "weather_icon_unavailable")?;
+    if !output.status.success() || !valid_weather_png(&output.stdout) {
+        return Err("weather_icon_unavailable");
+    }
+    Ok(output.stdout)
+}
+
+fn find_bytes(input: &[u8], needle: &[u8]) -> Option<usize> {
+    input
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn skip_json_space(input: &[u8], index: &mut usize) {
+    while input
+        .get(*index)
+        .is_some_and(|byte| b" \t\r\n".contains(byte))
+    {
+        *index += 1;
+    }
+}
+
+fn condition_code(condition: &str) -> u8 {
+    let condition = condition.to_ascii_lowercase();
+    if condition.contains("thunder") || condition.contains("storm") {
+        6
+    } else if condition.contains("snow") || condition.contains("blizzard") {
+        5
+    } else if condition.contains("rain")
+        || condition.contains("drizzle")
+        || condition.contains("shower")
+    {
+        4
+    } else if condition.contains("partly") || condition.contains("mostly sunny") {
+        3
+    } else if condition.contains("cloud")
+        || condition.contains("overcast")
+        || condition.contains("fog")
+    {
+        2
+    } else if condition.contains("sun") || condition.contains("clear") {
+        1
+    } else {
+        0
+    }
+}
+
+fn weather_objects(array: &[u8]) -> Vec<&[u8]> {
+    let mut objects = Vec::new();
+    let mut index = 1usize;
+    while index < array.len() {
+        if array[index] == b'{' {
+            let Some(end) = json_container_end(array, index, b'{', b'}') else {
+                return Vec::new();
+            };
+            objects.push(&array[index..=end]);
+            index = end + 1;
+        } else {
+            index += 1;
+        }
+    }
+    objects
+}
+
+fn summarize_weather(body: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let current = json_object(body, "current").ok_or("invalid_weather_response")?;
+    let hourly = json_array(body, "hourly").ok_or("invalid_weather_response")?;
+    let daily = json_array(body, "daily").ok_or("invalid_weather_response")?;
+    let temperature = json_number_field(current, "temperature")
+        .ok_or("invalid_weather_response")?
+        .round()
+        .clamp(-100.0, 100.0) as i32;
+    let current_code = json_string_field(current, "condition")
+        .map(|value| condition_code(&value))
+        .ok_or("invalid_weather_response")?;
+    let icon_key = json_string_field(current, "icon_key")
+        .filter(|value| valid_weather_icon_key(value))
+        .ok_or("invalid_weather_response")?;
+    let today = weather_objects(daily)
+        .into_iter()
+        .next()
+        .ok_or("invalid_weather_response")?;
+    let high = json_number_field(today, "high")
+        .ok_or("invalid_weather_response")?
+        .round()
+        .clamp(-100.0, 100.0) as i32;
+    let low = json_number_field(today, "low")
+        .ok_or("invalid_weather_response")?
+        .round()
+        .clamp(-100.0, 100.0) as i32;
+    if high < low {
+        return Err("invalid_weather_response");
+    }
+
+    let mut maximum_precipitation = 0u8;
+    let mut forecast_code = 0u8;
+    let mut temperature_extreme = if temperature <= 0 {
+        2
+    } else if temperature >= 32 {
+        1
+    } else {
+        0
+    };
+    let objects = weather_objects(hourly);
+    if objects.is_empty() {
+        return Err("invalid_weather_response");
+    }
+    for item in objects {
+        if let Some(probability) = json_number_field(item, "precipitation_probability") {
+            let probability = probability.round().clamp(0.0, 100.0) as u8;
+            if probability > maximum_precipitation {
+                maximum_precipitation = probability;
+                forecast_code = json_string_field(item, "condition")
+                    .map(|value| condition_code(&value))
+                    .unwrap_or(0);
+            }
+        }
+        if let Some(forecast_temperature) = json_number_field(item, "temperature") {
+            if forecast_temperature <= 0.0 {
+                temperature_extreme = 2;
+            } else if forecast_temperature >= 32.0 && temperature_extreme != 2 {
+                temperature_extreme = 1;
+            }
+        }
+    }
+
+    let condition = if matches!(current_code, 4..=6) {
+        current_code
+    } else if maximum_precipitation >= 50 && matches!(forecast_code, 4..=6) {
+        forecast_code
+    } else {
+        current_code
+    };
+    let alert = if condition == 6 {
+        4
+    } else if condition == 5 {
+        5
+    } else if condition == 4 || maximum_precipitation >= 50 && matches!(forecast_code, 4..=6) {
+        3
+    } else {
+        temperature_extreme
+    };
+    let noteworthy = matches!(condition, 4..=6) || maximum_precipitation >= 50 || alert != 0;
+    Ok(format!(
+        "TMW2 {} {} {} {} {} {} {} {}\n",
+        condition,
+        temperature,
+        alert,
+        maximum_precipitation,
+        u8::from(noteworthy),
+        high,
+        low,
+        icon_key
+    )
+    .into_bytes())
 }
 
 fn send_response(stream: &mut TcpStream, mut reply: Response) -> io::Result<()> {
@@ -906,6 +1308,51 @@ mod tests {
     }
 
     #[test]
+    fn curl_config_captures_status_without_printing_headers() {
+        let config = format!(
+            "write-out = \"\\\\nTOMTOM_HTTP_STATUS:%{{http_code}}\"\nheader = \"Authorization: Bearer {}\"\n",
+            "private-token"
+        );
+        assert!(config.contains("TOMTOM_HTTP_STATUS:%{http_code}"));
+        assert!(!config.contains("fail = true"));
+    }
+
+    #[test]
+    fn summarizes_normal_conditions_as_hidden() {
+        let body = br#"{"current":{"temperature":20,"condition":"Cloudy","icon_key":"cloudy"},"hourly":[{"temperature":19,"condition":"Cloudy","precipitation_probability":10},{"temperature":21,"condition":"Partly cloudy","precipitation_probability":20}],"daily":[{"high":24,"low":12}]}"#;
+        assert_eq!(
+            summarize_weather(body).unwrap(),
+            b"TMW2 2 20 0 20 0 24 12 cloudy\n"
+        );
+    }
+
+    #[test]
+    fn summarizes_forecast_rain_and_extreme_temperature() {
+        let body = br#"{"current":{"temperature":34,"condition":"Sunny","icon_key":"sunny"},"hourly":[{"temperature":34,"condition":"Sunny","precipitation_probability":10},{"temperature":30,"condition":"Rain showers","precipitation_probability":70}],"daily":[{"high":36,"low":23}]}"#;
+        assert_eq!(
+            summarize_weather(body).unwrap(),
+            b"TMW2 4 34 3 70 1 36 23 sunny\n"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_forecasts() {
+        assert!(summarize_weather(
+            br#"{"current":{"temperature":20,"condition":"Cloudy"},"hourly":[]}"#
+        )
+        .is_err());
+        assert!(summarize_weather(br#"{"current":{"temperature":"warm"},"hourly":[{}]}"#).is_err());
+    }
+
+    #[test]
+    fn weather_icon_proxy_rejects_untrusted_paths_and_bad_pngs() {
+        assert!(valid_weather_icon_key("partly_cloudy"));
+        assert!(!valid_weather_icon_key("../secret"));
+        assert!(!valid_weather_icon_key("partly/cloudy"));
+        assert!(!valid_weather_png(b"not a png"));
+    }
+
+    #[test]
     fn http_health_reports_weather_readiness_without_secrets() {
         let storage = test_storage();
         let reply = http_round_trip(
@@ -969,5 +1416,34 @@ mod tests {
         assert!(denied.contains("400 Bad Request"));
         assert!(denied.contains("location_sharing_consent_required"));
         fs::remove_dir_all(storage).unwrap();
+    }
+
+    #[test]
+    fn weather_display_endpoint_is_never_cacheable() {
+        let storage = test_storage();
+        let config = test_config(storage.clone());
+
+        let wrong_method = http_round_trip(
+            config.clone(),
+            b"GET /v1/weather/display HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        );
+        assert!(wrong_method.contains("405 Method Not Allowed"));
+        assert!(wrong_method.contains("Cache-Control: no-store\r\n"));
+
+        let payload = br#"{"latitude":48.8566,"longitude":2.3522,"location_sharing_enabled":true}"#;
+        let request = format!(
+            "POST /v1/weather/display HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            payload.len(),
+            std::str::from_utf8(payload).unwrap()
+        );
+        let unavailable = http_round_trip(config, request.as_bytes());
+        assert!(unavailable.contains("503 Service Unavailable"));
+        assert!(unavailable.contains("Cache-Control: no-store\r\n"));
+        fs::remove_dir_all(storage).unwrap();
+    }
+
+    #[test]
+    fn weather_refresh_limit_preserves_retryable_http_status() {
+        assert_eq!(status_reason(429), "Too Many Requests");
     }
 }

@@ -34,8 +34,17 @@ or browser-only mockups.
 - `project/src/opentom_skel/bin/watchface_next`: helper that advances the
   running app by signal.
 - `project/kernel/drivers/barcelona/gpio/gpio.c`: relevant GPIO/power-button
-  source from the OpenTom checkout.
+  source from the OpenTom checkout; the duration event is generic and leaves
+  press-to-action policy to the user-space helper.
+- `project/kernel/include/barcelona/Barc_Gpio.h`: matching button-duration
+  ioctl and event structure.
 - `project/applications/src/tools/power_button.c`: current power-button helper.
+- `project/applications/src/tools/power_button_policy.h`: user-space
+  duration-to-action policy, covered by `project/tests/power_button_duration_test.c`.
+- `project/src/opentom_skel/etc/power-button.cfg`: editable thresholds and
+  action paths; the current mapping is <=250 ms to toggle the panel,
+  251–399 ms ignored, and >=400 ms to suspend. Send `SIGHUP` to the
+  duration-aware daemon after editing to reload without rebooting.
 - `project/kernel/drivers/char/s3c2410-rtc.c`: relevant RTC driver source.
 - `project/kernel/.config`: build configuration excerpt's full source config.
 - `context/HARDWARE_FACTS.md`: observed device values and config facts.
@@ -44,10 +53,13 @@ or browser-only mockups.
   local source refactor; treat as baseline only, not as the current build.
 - `opentom-license.txt`: project license notice.
 
-The preview uses source files and editable/raster glyph atlases only; generated
+The preview uses source files and editable/raster glyph atlases; generated
 device executables and screenshots are kept out of this source directory.
-Weather remains a later task: the preview currently has no weather provider or
-validated live telemetry path.
+The separate weather companion/relay path now supplies a compact RAM-only
+summary to the preview renderer from a checksum-valid GPS fix, or from the
+configured Tzaneen fallback location after 60 seconds without a fix.
+See `preview/VISUAL_DESIGN_HANDOFF.md` for the icon/animation asset workflow
+and constraints before making visual changes.
 
 ## Findings to keep in mind
 
@@ -58,11 +70,12 @@ has RTC support, but that config alone does not establish that a valid
 battery-backed clock is read into system time at boot. The physical RTC node,
 backup-domain power source, and retained time need verification.
 
-The power GPIO source currently reports a shutdown event after about
-400–600 ms, and has a separate 10-second pre-PIC-reset path. This does not
-mean the current system waits 10 seconds to shut down. Treat any change to
-make ten seconds the only power-off action as a separate, hardware-sensitive
-kernel behavior change.
+The duration-aware GPIO source samples only the power input at 50 Hz and
+reports a completed press with its measured milliseconds through
+`IOR_BUTTON_EVENT`. The kernel makes no gesture/action choice; the OS-side
+configuration does. Other GPIO status timing and the independent 10-second
+pre-PIC reset path are preserved. The event duration is quantized to about
+20 ms and should be calibrated on the device before adding more gestures.
 
 Device metadata reported a GPS UART (`ttySAC1`, `gpstype=128`), but that is not
 proof that a valid GPS time/fix is available to user space. Investigate the
@@ -72,9 +85,8 @@ USB Ethernet at `192.168.101.115` was observed only while connected to a Linux
 host. A router USB connector is not necessarily a USB Ethernet host; there is
 no verified router internet, NTP, DNS, or remote-update setup yet.
 
-The project startup currently uses `TZ=CEST-2`; replace that with a real
-`Europe/Paris` timezone rule if the root filesystem includes zone data or
-otherwise provide a tested daylight-saving-aware solution.
+The project startup applies the weather service's current location offset when
+available and otherwise uses a daylight-saving-aware Paris timezone rule.
 
 ## Build in the full checkout
 
@@ -87,6 +99,7 @@ source get_cross_env.sh
 make -B -C applications/src/tools watchface
 ```
 
-Check warning output and confirm the result is a 32-bit ARM ELF. Do not install
-the result, modify `ttsystem`, rebuild kernel modules, or reboot the device as
-part of the Gemini task.
+Check warning output and confirm the result is a 32-bit ARM ELF. The GPIO
+duration-interface change requires rebuilding the complete matching
+`ttsystem`, not loading a generic kernel module. Keep the previous image and
+startup files as rollback copies before installing or rebooting.
