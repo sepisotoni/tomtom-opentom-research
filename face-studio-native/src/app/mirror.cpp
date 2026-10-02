@@ -103,7 +103,20 @@ bool Mirror::start(const MirrorSource& source, MirrorFit fit, std::string& error
     fit_ = fit;
     frames_ = 0;
     set_note("");
-    if (!transport_.start()) { error = "Could not start the frame sender."; return false; }
+    // Single-owner rule (windows-idd/README.md): take the lease first so the extended-display driver
+    // releases the receiver's one TCP client slot, give it a moment, then connect.
+    if (!lease_.acquire()) {
+        error = lease_.last_error() == ERROR_ALREADY_EXISTS
+                    ? "Another Face Studio window is already mirroring to the TomTom."
+                    : "Could not take the display-sharing lease.";
+        return false;
+    }
+    Sleep(300);
+    if (!transport_.start()) {
+        lease_.release();
+        error = "Could not start the frame sender.";
+        return false;
+    }
     stop_ = false;
     running_ = true;
     thread_ = std::thread([this] { run(); });
@@ -115,6 +128,7 @@ void Mirror::stop() {
     stop_ = true;
     if (thread_.joinable()) thread_.join();
     transport_.stop();
+    lease_.release();  // after the transport is closed, so the driver never meets our socket
     running_ = false;
 }
 
@@ -240,6 +254,7 @@ void Mirror::run() {
     DeleteDC(panel_dc);
     ReleaseDC(nullptr, screen);
     transport_.stop();
+    lease_.release();
     running_ = false;
 }
 

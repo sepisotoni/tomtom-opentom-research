@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../display/frame_transport.h"
+#include "../display/mirror_lease.h"
 
 namespace app {
 
@@ -51,6 +52,7 @@ private:
     MirrorSource source_;
     MirrorFit fit_ = MirrorFit::Letterbox;
     tt::display::FrameTransport transport_;
+    tt::display::MirrorLease lease_;  // keeps the IDD driver off the receiver's single TCP client slot while we mirror
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_{false};

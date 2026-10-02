@@ -37,6 +37,7 @@
 #include "webhook.h"
 #include "lrclib.h"
 #include "mirror.h"
+#include "extdisplay.h"
 #include "spotify.h"
 #include <memory>
 #include <mutex>
@@ -97,6 +98,7 @@ enum Ids {
     ID_MIR_SRC = 800, ID_MIR_REFRESH, ID_MIR_FIT, ID_MIR_START, ID_MIR_STOP, ID_MIR_STATUS, ID_MIR_WARN,
     ID_NF_TEXT = 820, ID_NF_TTL, ID_NF_TTL_SPIN, ID_NF_SEND, ID_NF_STATUS,
     ID_WH_ENABLE = 830, ID_WH_PORT, ID_WH_PORT_SPIN, ID_WH_LAN, ID_WH_TOKEN, ID_WH_REGEN, ID_WH_EXAMPLE, ID_WH_STATUS,
+    ID_EXT_STATUS = 870, ID_EXT_ADD, ID_EXT_REMOVE, ID_EXT_PAUSE, ID_EXT_RESUME, ID_EXT_NOTE,
     ID_SP_NOW = 850, ID_SP_ANNOUNCE, ID_LY_ENABLE, ID_LY_SLOWER, ID_LY_FASTER, ID_LY_RESTART, ID_LY_OFFSET, ID_LY_STATUS,
 };
 constexpr UINT WM_DEVICE_DONE = WM_APP + 1;
@@ -1226,6 +1228,10 @@ struct LyricsReply {
 };
 
 struct Features {
+    app::ExtDisplay ext;
+    ULONGLONG last_ext_poll = 0;
+    unsigned ext_action_seen = 0;
+    std::string ext_message;  // one-off result of the last button press
     std::unique_ptr<app::Mirror> mirror;
     std::vector<app::MirrorSource> sources;
     bool mirror_confirmed = false;
@@ -1329,11 +1335,14 @@ void mirror_start() {
     if (!F.mirror_confirmed) {
         int r = MessageBoxW(S.hwnd,
                             L"Start mirroring to the TomTom?\n\n"
-                            L"Before you do:\n"
-                            L" - The TomTom display receiver must be running on the device.\n"
-                            L" - The normal watchface renderer must be stopped: both write the same screen memory.\n"
-                            L" - The TomTom must be connected directly by USB. Pixels are sent unencrypted.\n\n"
-                            L"This feature is experimental and has not been verified end to end on hardware.",
+                            L"Read this first:\n"
+                            L" - The TomTom has no start/stop command for this yet. The display receiver must already be running "
+                            L"and the clock renderer stopped by hand, because both write the same screen memory.\n"
+                            L" - The device's startup script restarts the renderer on its own, which can fight the receiver.\n"
+                            L" - When you stop mirroring the TomTom does NOT bring its clock back by itself; restore it the way you "
+                            L"normally restart the watchface.\n"
+                            L" - Connect directly by USB. Pixels are sent unencrypted.\n\n"
+                            L"Experimental: the receiver has not been verified on the physical TomTom.",
                             L"Mirror to TomTom", MB_OKCANCEL | MB_ICONWARNING);
         if (r != IDOK) return;
         F.mirror_confirmed = true;
@@ -1464,7 +1473,7 @@ void poll_spotify(ULONGLONG now) {
             F.lyrics_state.clear();
             if (F.announce) {
                 std::string err;
-                send_to_tomtom(8, np.artist + " - " + np.title, err);
+                send_to_tomtom(10, np.artist + " - " + np.title, err);
             }
             if (F.lyrics_on) start_lyrics_fetch();
         } else if (!F.track_playing) {
@@ -1499,7 +1508,7 @@ void lyrics_tick(ULONGLONG now) {
     int chunk = static_cast<int>(std::max<long long>(0, std::min<long long>(n - 1, (pos - line.start_ms) * n / dur)));
     if (idx == F.shown_line && chunk == F.shown_chunk) return;
     if (now - F.last_send_tick < 700) return;  // stay gentle on the device
-    int ttl = static_cast<int>(std::max<long long>(3, std::min<long long>(12, dur / n / 1000 + 2)));
+    int ttl = static_cast<int>(std::max<long long>(2, std::min<long long>(6, dur / n / 1000 + 1)));
     std::string err;
     if (send_to_tomtom(ttl, chunks[static_cast<size_t>(chunk)], err)) {
         F.shown_line = idx;
@@ -1508,8 +1517,78 @@ void lyrics_tick(ULONGLONG now) {
     }
 }
 
+// ---- extended display (virtual Windows monitor via the IDD driver's control tool)
+void ext_update_ui() {
+    HWND pg = page(PageDisplay);
+    app::ExtSnapshot e = F.ext.snapshot();
+    std::string text;
+    if (!e.tool_found) {
+        text = "The display driver tool (TomTomDisplayControl.exe) was not found next to this program, so the extended display is unavailable.";
+    } else if (e.disable_pending) {
+        text = "Removing the extended display...";
+    } else if (e.enable_host_alive && !(e.status_valid && e.present)) {
+        text = "Adding the extended display... waiting for Windows and the driver (up to about 20 s).";
+    } else if (e.status_valid && e.present) {
+        text = e.running ? "Extended display is ON and streaming to the TomTom. Frames acknowledged: " + std::to_string(e.frames)
+                         : "Extended display is ON but not streaming: paused, mirroring is active, or the new monitor is not set to "
+                           "Extend in Windows display settings.";
+    } else if (e.status_valid) {
+        text = "No extended display yet. Press Add extended display.";
+    } else if (!e.last_error.empty()) {
+        text = e.last_error;
+    } else {
+        text = "Checking...";
+    }
+    if (!F.ext_message.empty()) text += "\n" + F.ext_message;
+    label(pg, ID_EXT_STATUS, text);
+    bool present = e.status_valid && e.present;
+    EnableWindow(child(pg, ID_EXT_ADD), e.tool_found && !present && !e.enable_host_alive && !e.disable_pending);
+    EnableWindow(child(pg, ID_EXT_REMOVE), e.tool_found && (present || e.enable_host_alive) && !e.disable_pending);
+    EnableWindow(child(pg, ID_EXT_PAUSE), e.tool_found && present);
+    EnableWindow(child(pg, ID_EXT_RESUME), e.tool_found && present);
+}
+
+void ext_add() {
+    std::string err;
+    F.ext_message.clear();
+    if (!F.ext.start_enable(err)) F.ext_message = err;
+    F.last_ext_poll = 0;
+    ext_update_ui();
+}
+
+void ext_remove() {
+    std::string err;
+    F.ext_message.clear();
+    if (!F.ext.start_disable(err)) F.ext_message = err;
+    F.last_ext_poll = 0;
+    ext_update_ui();
+}
+
+void ext_pause(bool pause) {
+    F.ext_message = pause ? "Pausing..." : "Resuming...";
+    F.ext.request_pause(pause);
+    F.last_ext_poll = 0;
+}
+
 void live_tick() {
     HWND live = page(PageLive);
+    if (IsWindowVisible(page(PageDisplay))) {
+        ULONGLONG t = GetTickCount64();
+        if (t - F.last_ext_poll >= 1500) {
+            F.last_ext_poll = t;
+            F.ext.request_status();
+        }
+        app::ExtSnapshot e = F.ext.snapshot();
+        if (e.action_seq != F.ext_action_seen) {  // a pause/resume finished
+            F.ext_action_seen = e.action_seq;
+            F.ext_message = e.action_exit == 0 ? "" : e.action_error;
+        } else if (e.last_command == "enable" && !e.enable_host_alive && e.last_exit > 0) {
+            F.ext_message = e.last_error;  // the elevated enable host stopped early
+        } else if (e.last_command == "disable" && !e.disable_pending && e.last_exit > 0) {
+            F.ext_message = e.last_error;
+        }
+        ext_update_ui();
+    }
     if (F.mirror && F.mirror->running()) mirror_update_ui();
     else if (F.mirror && IsWindowVisible(page(PageDisplay))) mirror_update_ui();
     if (F.webhook.running()) {
@@ -1528,6 +1607,7 @@ void live_tick() {
 
 void shutdown_features() {
     if (F.mirror) F.mirror->stop();
+    F.ext.release_handles();  // the elevated enable host (if any) keeps the monitor alive; closing the window must not remove it silently
     F.webhook.stop();
 }
 
@@ -1545,11 +1625,22 @@ void create_display_page(HWND p) {
     mk_button(p, L"Stop", 196, 134, 176, 28, ID_MIR_STOP);
     EnableWindow(child(p, ID_MIR_STOP), FALSE);
     mk_label(p, L"Not running.", 8, 172, 364, 54, ID_MIR_STATUS);
-    mk_label(p, L"BEFORE YOU START: the TomTom's display receiver (tomtom-display-receiver) must be running and the normal "
-                L"watchface renderer stopped, because both write the same screen memory. Experimental: not yet verified end to end "
-                L"on a real device. Frames go only to the TomTom's USB address (192.168.101.115:18745), at about 9 per second, "
-                L"unencrypted. Nothing is recorded or saved. Windows that block capture will appear black.",
-             8, 236, 364, 150, ID_MIR_WARN);
+    mk_label(p, L"BLOCKED ON THE DEVICE SIDE: the TomTom has no display start/stop command yet. The display receiver "
+                L"(tomtom-display-receiver) must be started by hand with the clock renderer stopped (both write the same screen "
+                L"memory), the device's startup script may restart the renderer underneath it, and the clock does not come back "
+                L"when you stop. Experimental, not yet verified on the physical TomTom. Frames go only to 192.168.101.115:18745 "
+                L"over USB, about 9 per second, unencrypted. Nothing is recorded. Windows that block capture appear black. "
+                L"If the extended-display driver is installed it steps aside while you mirror.",
+             8, 232, 364, 134, ID_MIR_WARN);
+    mk(p, L"BUTTON", L"Extended display (a real Windows monitor)", BS_GROUPBOX, 8, 372, 364, 206, -1);
+    mk_label(p, L"", 18, 392, 346, 52, ID_EXT_STATUS);
+    mk_button(p, L"Add extended display", 18, 448, 170, 26, ID_EXT_ADD);
+    mk_button(p, L"Remove extended display", 194, 448, 170, 26, ID_EXT_REMOVE);
+    mk_button(p, L"Pause streaming", 18, 478, 170, 26, ID_EXT_PAUSE);
+    mk_button(p, L"Resume streaming", 194, 478, 170, 26, ID_EXT_RESUME);
+    mk_label(p, L"Needs the TomTom display driver (Windows test-signing mode, see windows-idd/README.md) and "
+                L"TomTomDisplayControl.exe next to this program. Adding or removing asks for administrator permission. "
+                L"While you mirror above, the driver steps aside.", 18, 510, 346, 64, ID_EXT_NOTE);
     refresh_mirror_sources();
 }
 
@@ -1773,6 +1864,10 @@ void handle_command(int id, int code, HWND src) {
         case ID_MIR_REFRESH: refresh_mirror_sources(); break;
         case ID_MIR_START: mirror_start(); break;
         case ID_MIR_STOP: mirror_stop(); break;
+        case ID_EXT_ADD: ext_add(); break;
+        case ID_EXT_REMOVE: ext_remove(); break;
+        case ID_EXT_PAUSE: ext_pause(true); break;
+        case ID_EXT_RESUME: ext_pause(false); break;
         case ID_NF_SEND: send_test_notification(); break;
         case ID_WH_ENABLE: webhook_apply(Button_GetCheck(src) == BST_CHECKED); break;
         case ID_WH_REGEN:

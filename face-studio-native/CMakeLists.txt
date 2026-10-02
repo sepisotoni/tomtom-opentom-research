@@ -93,6 +93,7 @@ if(WIN32 AND FACESTUDIO_BUILD_APP)
     src/app/spotify.cpp
     src/app/lrclib.cpp
     src/app/mirror.cpp
+    src/app/extdisplay.cpp
     src/display/frame_converter.cpp
     src/display/frame_transport.cpp
     ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c

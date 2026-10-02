@@ -99,10 +99,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          $name = "TomTomFaceStudio-${{ steps.meta.outputs.tag }}-win-x64.exe"
-          Copy-Item build\Release\TomTomFaceStudio.exe "dist\$name"
-          $hash = (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name" | Out-File -Encoding ascii dist\SHA256SUMS.txt
+          $studio = "TomTomFaceStudio-${{ steps.meta.outputs.tag }}-win-x64.exe"
+          Copy-Item build\Release\TomTomFaceStudio.exe "dist\$studio"
+          # The extended-display control tool must sit next to TomTomFaceStudio.exe (rename the Studio copy back if you like).
+          Copy-Item build\Release\TomTomDisplayControl.exe dist\TomTomDisplayControl.exe
+          Get-ChildItem dist | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Out-File -Encoding ascii dist\SHA256SUMS.txt
           Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
@@ -136,7 +139,9 @@ jobs:
           cat > notes.md <<'NOTES'
           **TomTom Face Studio (native Windows x64)** - a single `.exe`, nothing to install.
 
-          - Verify the download with `SHA256SUMS.txt` (`certutil -hashfile <exe> SHA256`).
+          - Verify downloads with `SHA256SUMS.txt` (`certutil -hashfile <exe> SHA256`).
+          - `TomTomDisplayControl.exe` is the optional extended-display control tool; keep it in the same folder as the Studio. The
+            virtual-monitor driver itself is not included (it needs a Windows Driver Kit build; see windows-idd/README.md).
           - The executable is **not code-signed**, so Windows SmartScreen may warn on first run.
           - The Device tab talks to the TomTom's unencrypted, unauthenticated control service. Keep the TomTom on a direct
             USB link; never bridge or expose that connection to Wi-Fi or the internet.

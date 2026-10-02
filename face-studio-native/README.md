@@ -90,8 +90,8 @@ git tag v1.2.0-rc1 && git push origin v1.2.0-rc1   # marked as a pre-release
 ```
 
 * The tag must look like `vMAJOR.MINOR.PATCH` (optionally `-suffix`) and the tagged commit must already be on `main`.
-* The workflow builds with MSVC, runs `facestudio_tests.exe`, stamps the version into the exe's file properties, and attaches
-  `TomTomFaceStudio-<tag>-win-x64.exe` plus `SHA256SUMS.txt`. Release notes are generated from the commits since the previous release.
+* The workflow builds with MSVC, runs every CTest target, stamps the version into the exe's file properties, and attaches
+  `TomTomFaceStudio-<tag>-win-x64.exe`, `TomTomDisplayControl.exe` (optional, for the extended display) and `SHA256SUMS.txt`. Release notes are generated from the commits since the previous release.
 * Run it by hand from the Actions tab ("Release - Native Face Studio") to try it out: a manual run creates a **draft** release by default.
 * The exe is not code-signed, so SmartScreen may warn on first run.
 
@@ -100,6 +100,10 @@ git tag v1.2.0-rc1 && git push origin v1.2.0-rc1   # marked as a pre-release
 * **Display - mirror a screen or one window** onto the TomTom's 320x240 panel (GDI capture, fit / fill / stretch scaling,
   about 9 fps) through the display receiver on TCP 18745. This is a mirror; a real Windows *extended* monitor needs the
   driver in `windows-idd/`. Experimental: the receiver must be started by hand and the normal renderer stopped first.
+* **Display - extended display** (the other half): add/remove a real Windows monitor that streams to the TomTom, and pause/resume
+  streaming, by driving `TomTomDisplayControl.exe` (keep it next to the Studio). Adding/removing asks for administrator
+  permission; the monitor exists only while the elevated `enable` process runs. Needs the separate driver from `windows-idd/`
+  (test-signing mode). While you mirror, the driver steps aside through the single-owner lease on the receiver's one TCP client.
 * **Live - notification**: send a message (<= 32 plain characters, accents simplified) to the TomTom's notification receiver.
 * **Live - webhook**: other programs POST to `http://127.0.0.1:18750/notify` with a bearer token (JSON `{"text": "...", "ttl": 10}`,
   Discord-style `{"content": "..."}` or a plain-text body). Loopback only unless "Allow private LAN" is ticked; random 128-bit
