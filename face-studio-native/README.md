@@ -95,6 +95,21 @@ git tag v1.2.0-rc1 && git push origin v1.2.0-rc1   # marked as a pre-release
 * Run it by hand from the Actions tab ("Release - Native Face Studio") to try it out: a manual run creates a **draft** release by default.
 * The exe is not code-signed, so SmartScreen may warn on first run.
 
+## Live features (Display and Live tabs)
+
+* **Display - mirror a screen or one window** onto the TomTom's 320x240 panel (GDI capture, fit / fill / stretch scaling,
+  about 9 fps) through the display receiver on TCP 18745. This is a mirror; a real Windows *extended* monitor needs the
+  driver in `windows-idd/`. Experimental: the receiver must be started by hand and the normal renderer stopped first.
+* **Live - notification**: send a message (<= 32 plain characters, accents simplified) to the TomTom's notification receiver.
+* **Live - webhook**: other programs POST to `http://127.0.0.1:18750/notify` with a bearer token (JSON `{"text": "...", "ttl": 10}`,
+  Discord-style `{"content": "..."}` or a plain-text body). Loopback only unless "Allow private LAN" is ticked; random 128-bit
+  token, 1 KiB body cap, rate limited. The token and port are kept in `%APPDATA%\TomTomFaceStudio\settings.ini`.
+* **Live - Spotify**: track changes (read from the Spotify desktop window title - no account, nothing sent anywhere) and
+  optional time-synced lyrics (artist + title looked up over HTTPS at lrclib.net, held in memory only). Lyrics reach the
+  TomTom as short notifications; sync is estimated, with +/-0.25 s nudge and restart buttons.
+
+See `docs/NATIVE_APP_AGENT_HANDOFF.md` for the device-side contract and open requests.
+
 ## Tests
 
 | Suite | Command |
@@ -126,6 +141,7 @@ Measured on the GitHub Actions `windows-latest` runner (MSVC, Release, `/MT`, `/
 * The only footprint that is not ours: JPEG/PNG/BMP decoding goes through the OS Windows Imaging Component (reached via COM, so it adds no import and no code to the exe).
 
 ## Not ported / differences (deliberate, please review)
+
 
 * **Weather cache and location sharing** (`studio/core/weather.py`, `weather-service/`) are not part of this port;
   the editor still exports `data_requirements` exactly as before.

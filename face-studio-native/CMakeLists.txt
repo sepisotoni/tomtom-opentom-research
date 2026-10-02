@@ -36,7 +36,10 @@ add_library(facestudio_core STATIC
   src/core/fileio.cpp
   src/core/package.cpp
   src/core/gallery.cpp
-  src/core/device_client.cpp)
+  src/core/device_client.cpp
+  src/core/notify.cpp
+  src/core/lrc.cpp
+  src/core/webhook.cpp)
 target_include_directories(facestudio_core PUBLIC src/core)
 
 if(MSVC)
@@ -45,8 +48,10 @@ if(MSVC)
 else()
   target_compile_options(facestudio_core PUBLIC -Wall -Wextra)
 endif()
+find_package(Threads REQUIRED)
+target_link_libraries(facestudio_core PUBLIC Threads::Threads)
 if(WIN32)
-  target_link_libraries(facestudio_core PUBLIC ws2_32)
+  target_link_libraries(facestudio_core PUBLIC ws2_32 bcrypt)
 endif()
 
 # Small, dependency-free binaries: static runtime, dead-code elimination.
@@ -85,9 +90,17 @@ if(WIN32 AND FACESTUDIO_BUILD_APP)
   configure_file(src/app/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
   add_executable(TomTomFaceStudio WIN32
     src/app/main.cpp
+    src/app/spotify.cpp
+    src/app/lrclib.cpp
+    src/app/mirror.cpp
+    src/display/frame_converter.cpp
+    src/display/frame_transport.cpp
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c
     "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
+  target_include_directories(TomTomFaceStudio PRIVATE
+    ../watchface-research/project/src/opentom_skel/bin)
   target_link_libraries(TomTomFaceStudio PRIVATE facestudio_core
-    user32 gdi32 comctl32 comdlg32 shell32 ole32 windowscodecs uuid)
+    user32 gdi32 comctl32 comdlg32 shell32 ole32 windowscodecs uuid winhttp)
   target_compile_definitions(TomTomFaceStudio PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
   facestudio_shrink(TomTomFaceStudio)
   if(MSVC)

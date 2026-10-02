@@ -32,6 +32,14 @@
 #include "model.h"
 #include "package.h"
 #include "render.h"
+#include "lrc.h"
+#include "notify.h"
+#include "webhook.h"
+#include "lrclib.h"
+#include "mirror.h"
+#include "spotify.h"
+#include <memory>
+#include <mutex>
 
 using namespace tt;
 
@@ -86,12 +94,17 @@ enum Ids {
     ID_DEV_HOST = 500, ID_DEV_FACE, ID_DEV_APPLY, ID_DEV_READ, ID_DEV_PING, ID_DEV_STATUS, ID_DEV_WARN,
     IDM_OPEN = 600, IDM_SAVE, IDM_SAVEAS, IDM_EXIT, IDM_UNDO, IDM_REDO, IDM_ABOUT,
     ID_STATUSBAR = 700,
+    ID_MIR_SRC = 800, ID_MIR_REFRESH, ID_MIR_FIT, ID_MIR_START, ID_MIR_STOP, ID_MIR_STATUS, ID_MIR_WARN,
+    ID_NF_TEXT = 820, ID_NF_TTL, ID_NF_TTL_SPIN, ID_NF_SEND, ID_NF_STATUS,
+    ID_WH_ENABLE = 830, ID_WH_PORT, ID_WH_PORT_SPIN, ID_WH_LAN, ID_WH_TOKEN, ID_WH_REGEN, ID_WH_EXAMPLE, ID_WH_STATUS,
+    ID_SP_NOW = 850, ID_SP_ANNOUNCE, ID_LY_ENABLE, ID_LY_SLOWER, ID_LY_FASTER, ID_LY_RESTART, ID_LY_OFFSET, ID_LY_STATUS,
 };
 constexpr UINT WM_DEVICE_DONE = WM_APP + 1;
+constexpr UINT WM_LYRICS_DONE = WM_APP + 2;
 const wchar_t* const kSwatches[8] = {L"#84EBFF", L"#00F5FF", L"#E8DAF2", L"#FF7341", L"#60A5FA", L"#000000", L"#FFFFFF", L"#FF4444"};
 
 enum class Tool { Pencil, Eraser, Bucket, Picker };
-enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageCount };
+enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PageCount };
 
 struct DeviceReply {
     int kind;  // 0 ping, 1 status, 2 set
@@ -1046,7 +1059,7 @@ void layout() {
     RECT sb;
     GetWindowRect(S.status, &sb);
     int bottom = rc.bottom - (sb.bottom - sb.top);
-    int right_w = D(404), left_w = D(240), pad = D(8);
+    int right_w = D(430), left_w = D(240), pad = D(8);
     MoveWindow(S.canvas_wnd, left_w, pad, std::max(50, static_cast<int>(rc.right) - left_w - right_w - pad), bottom - 2 * pad, TRUE);
     int tab_x = rc.right - right_w, tab_w = right_w - pad, tab_h = bottom - 2 * pad;
     MoveWindow(S.tab, tab_x, pad, tab_w, tab_h, TRUE);
@@ -1201,6 +1214,379 @@ void create_device_page(HWND p) {
              8, 296, 364, 120, ID_DEV_WARN);
 }
 
+// ------------------------------------------------------------------ live features
+// Display mirror, notification sender, webhook and Spotify now-playing / lyrics.
+// Everything here talks to the TomTom only over its USB address and only through
+// the existing receivers: UDP 45872 (notifications) and TCP 18745 (display frames).
+struct LyricsReply {
+    std::string key;
+    bool ok = false;
+    std::string lrc;
+    std::string error;
+};
+
+struct Features {
+    std::unique_ptr<app::Mirror> mirror;
+    std::vector<app::MirrorSource> sources;
+    bool mirror_confirmed = false;
+
+    tt::WebhookServer webhook;
+    std::string token;
+    std::mutex host_mutex;
+    std::string notify_host = kDefaultDeviceHost;
+
+    bool announce = false, lyrics_on = false;
+    std::string track_key, artist, title;
+    bool track_playing = false;
+    long long pos_base_ms = 0;
+    ULONGLONG resume_tick = 0;
+    long long offset_ms = 0;
+    std::vector<tt::LyricLine> lines;
+    std::string lyrics_state;
+    int shown_line = -2, shown_chunk = -1;
+    ULONGLONG last_send_tick = 0, last_poll_tick = 0;
+};
+Features F;
+
+std::wstring settings_file() {
+    wchar_t base[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"APPDATA", base, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return L"";
+    std::wstring dir = std::wstring(base) + L"\\TomTomFaceStudio";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\settings.ini";
+}
+
+void save_settings() {
+    std::wstring f = settings_file();
+    if (f.empty()) return;
+    HWND pg = page(PageLive);
+    WritePrivateProfileStringW(L"webhook", L"token", W(F.token).c_str(), f.c_str());
+    WritePrivateProfileStringW(L"webhook", L"port", std::to_wstring(get_int(pg, ID_WH_PORT, tt::kDefaultWebhookPort)).c_str(), f.c_str());
+    WritePrivateProfileStringW(L"webhook", L"lan", Button_GetCheck(child(pg, ID_WH_LAN)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+}
+
+void load_settings() {
+    std::wstring f = settings_file();
+    if (f.empty()) return;
+    HWND pg = page(PageLive);
+    wchar_t buf[128] = L"";
+    GetPrivateProfileStringW(L"webhook", L"token", L"", buf, 128, f.c_str());
+    std::string tok = U(buf);
+    if (tok.size() >= tt::kMinWebhookTokenLength) F.token = tok;
+    set_int(pg, ID_WH_PORT, static_cast<int>(GetPrivateProfileIntW(L"webhook", L"port", tt::kDefaultWebhookPort, f.c_str())));
+    Button_SetCheck(child(pg, ID_WH_LAN), GetPrivateProfileIntW(L"webhook", L"lan", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
+    set_text(child(pg, ID_WH_TOKEN), F.token);
+}
+
+void remember_notify_host() {
+    std::string host, err;
+    if (!parse_device_host(get_text(child(page(PageDevice), ID_DEV_HOST)), host, err)) return;
+    std::lock_guard<std::mutex> lock(F.host_mutex);
+    F.notify_host = host;
+}
+
+bool send_to_tomtom(int ttl, const std::string& text, std::string& err) {
+    std::string host;
+    {
+        std::lock_guard<std::mutex> lock(F.host_mutex);
+        host = F.notify_host;
+    }
+    return tt::send_notification(host, ttl, text, err);
+}
+
+void label(HWND pg, int id, const std::string& text) { set_text(child(pg, id), text); }
+
+// ---- display mirror
+void mirror_update_ui() {
+    HWND pg = page(PageDisplay);
+    bool running = F.mirror && F.mirror->running();
+    EnableWindow(child(pg, ID_MIR_START), !running);
+    EnableWindow(child(pg, ID_MIR_STOP), running);
+    EnableWindow(child(pg, ID_MIR_SRC), !running);
+    EnableWindow(child(pg, ID_MIR_FIT), !running);
+    EnableWindow(child(pg, ID_MIR_REFRESH), !running);
+    if (F.mirror) label(pg, ID_MIR_STATUS, F.mirror->status_text());
+}
+
+void refresh_mirror_sources() {
+    HWND combo = child(page(PageDisplay), ID_MIR_SRC);
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    F.sources = app::list_mirror_sources();
+    for (const app::MirrorSource& s : F.sources) SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s.label.c_str()));
+    if (!F.sources.empty()) SendMessageW(combo, CB_SETCURSEL, 0, 0);
+}
+
+void mirror_start() {
+    HWND pg = page(PageDisplay);
+    if (!F.mirror) F.mirror = std::make_unique<app::Mirror>();
+    if (F.mirror->running()) return;
+    int i = static_cast<int>(SendMessageW(child(pg, ID_MIR_SRC), CB_GETCURSEL, 0, 0));
+    if (i < 0 || i >= static_cast<int>(F.sources.size())) {
+        label(pg, ID_MIR_STATUS, "Choose something to mirror first (press Refresh).");
+        return;
+    }
+    if (!F.mirror_confirmed) {
+        int r = MessageBoxW(S.hwnd,
+                            L"Start mirroring to the TomTom?\n\n"
+                            L"Before you do:\n"
+                            L" - The TomTom display receiver must be running on the device.\n"
+                            L" - The normal watchface renderer must be stopped: both write the same screen memory.\n"
+                            L" - The TomTom must be connected directly by USB. Pixels are sent unencrypted.\n\n"
+                            L"This feature is experimental and has not been verified end to end on hardware.",
+                            L"Mirror to TomTom", MB_OKCANCEL | MB_ICONWARNING);
+        if (r != IDOK) return;
+        F.mirror_confirmed = true;
+    }
+    int fit = static_cast<int>(SendMessageW(child(pg, ID_MIR_FIT), CB_GETCURSEL, 0, 0));
+    std::string err;
+    if (!F.mirror->start(F.sources[static_cast<size_t>(i)],
+                         fit == 1 ? app::MirrorFit::Fill : fit == 2 ? app::MirrorFit::Stretch : app::MirrorFit::Letterbox, err))
+        label(pg, ID_MIR_STATUS, err);
+    mirror_update_ui();
+}
+
+void mirror_stop() {
+    if (F.mirror) F.mirror->stop();
+    mirror_update_ui();
+}
+
+// ---- notifications / webhook
+void send_test_notification() {
+    HWND pg = page(PageLive);
+    std::string err;
+    std::string text = get_text(child(pg, ID_NF_TEXT));
+    remember_notify_host();
+    if (send_to_tomtom(get_int(pg, ID_NF_TTL, 15), text, err))
+        label(pg, ID_NF_STATUS, "Sent: \"" + tt::sanitize_notification_text(text) + "\"");
+    else
+        label(pg, ID_NF_STATUS, err);
+}
+
+void update_webhook_example() {
+    HWND pg = page(PageLive);
+    int port = get_int(pg, ID_WH_PORT, tt::kDefaultWebhookPort);
+    set_text(child(pg, ID_WH_EXAMPLE),
+             "curl -X POST http://127.0.0.1:" + std::to_string(port) + "/notify -H \"Authorization: Bearer " + F.token +
+                 "\" -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"Hello\\\",\\\"ttl\\\":10}\"");
+}
+
+void webhook_apply(bool on) {
+    HWND pg = page(PageLive);
+    if (F.webhook.running()) F.webhook.stop();
+    if (!on) {
+        label(pg, ID_WH_STATUS, "Webhook is off.");
+        return;
+    }
+    if (F.token.size() < tt::kMinWebhookTokenLength) {
+        F.token = tt::generate_webhook_token();
+        if (F.token.empty()) {
+            Button_SetCheck(child(pg, ID_WH_ENABLE), BST_UNCHECKED);
+            label(pg, ID_WH_STATUS, "Could not generate a secure random token.");
+            return;
+        }
+    }
+    set_text(child(pg, ID_WH_TOKEN), F.token);
+    tt::WebhookServer::Config cfg;
+    cfg.port = get_int(pg, ID_WH_PORT, tt::kDefaultWebhookPort);
+    cfg.allow_lan = Button_GetCheck(child(pg, ID_WH_LAN)) == BST_CHECKED;
+    cfg.token = F.token;
+    remember_notify_host();
+    std::string err;
+    if (!F.webhook.start(cfg, [](int ttl, const std::string& text, std::string& e) { return send_to_tomtom(ttl, text, e); }, err)) {
+        Button_SetCheck(child(pg, ID_WH_ENABLE), BST_UNCHECKED);
+        label(pg, ID_WH_STATUS, err);
+        return;
+    }
+    save_settings();
+    update_webhook_example();
+    label(pg, ID_WH_STATUS, std::string("Listening on ") + (cfg.allow_lan ? "all private network addresses" : "127.0.0.1 only") + ", port " +
+                                std::to_string(cfg.port) + ".");
+}
+
+// ---- Spotify now playing / lyrics
+void start_lyrics_fetch() {
+    F.lyrics_state = "loading";
+    F.lines.clear();
+    F.shown_line = -2;
+    F.shown_chunk = -1;
+    label(page(PageLive), ID_LY_STATUS, "Looking up synced lyrics...");
+    std::string artist = F.artist, title = F.title, key = F.track_key;
+    HWND hwnd = S.hwnd;
+    std::thread([hwnd, artist, title, key] {
+        LyricsReply* r = new LyricsReply();
+        r->key = key;
+        r->ok = app::fetch_synced_lyrics(artist, title, r->lrc, r->error);
+        if (!PostMessageW(hwnd, WM_LYRICS_DONE, 0, reinterpret_cast<LPARAM>(r))) delete r;
+    }).detach();
+}
+
+void on_lyrics_done(LyricsReply* r) {
+    std::unique_ptr<LyricsReply> reply(r);
+    if (reply->key != F.track_key || !F.lyrics_on) return;  // stale answer
+    HWND pg = page(PageLive);
+    if (!reply->ok) {
+        F.lyrics_state = reply->error;
+        label(pg, ID_LY_STATUS, reply->error);
+        return;
+    }
+    F.lines = tt::parse_lrc(reply->lrc);
+    if (F.lines.empty()) {
+        F.lyrics_state = "The lyrics could not be read.";
+        label(pg, ID_LY_STATUS, F.lyrics_state);
+        return;
+    }
+    F.lyrics_state = "ready";
+    label(pg, ID_LY_STATUS, "Lyrics ready (" + std::to_string(F.lines.size()) + " lines). Sync is approximate - nudge it with the buttons.");
+}
+
+void update_offset_label() {
+    char b[48];
+    std::snprintf(b, sizeof b, "Offset %+.2f s", static_cast<double>(F.offset_ms) / 1000.0);
+    label(page(PageLive), ID_LY_OFFSET, b);
+}
+
+void poll_spotify(ULONGLONG now) {
+    HWND pg = page(PageLive);
+    app::NowPlaying np = app::read_spotify_now_playing();
+    if (np.playing) {
+        std::string key = np.artist + "\n" + np.title;
+        if (key != F.track_key) {
+            F.track_key = key;
+            F.artist = np.artist;
+            F.title = np.title;
+            F.pos_base_ms = 0;
+            F.resume_tick = now;
+            F.track_playing = true;
+            F.lines.clear();
+            F.shown_line = -2;
+            F.shown_chunk = -1;
+            F.lyrics_state.clear();
+            if (F.announce) {
+                std::string err;
+                send_to_tomtom(8, np.artist + " - " + np.title, err);
+            }
+            if (F.lyrics_on) start_lyrics_fetch();
+        } else if (!F.track_playing) {
+            F.track_playing = true;
+            F.resume_tick = now;
+        }
+        label(pg, ID_SP_NOW, "Now playing: " + np.artist + " - " + np.title);
+    } else {
+        if (F.track_playing) {
+            F.pos_base_ms += static_cast<long long>(now - F.resume_tick);
+            F.track_playing = false;
+        }
+        label(pg, ID_SP_NOW, np.running ? "Spotify is open - nothing playing." : "Spotify is not running.");
+    }
+}
+
+void lyrics_tick(ULONGLONG now) {
+    if (F.lyrics_state != "ready" || !F.track_playing || F.lines.empty()) return;
+    long long pos = F.pos_base_ms + static_cast<long long>(now - F.resume_tick) + F.offset_ms;
+    int idx = tt::find_lyric_line(F.lines, pos);
+    if (idx < 0) return;
+    const tt::LyricLine& line = F.lines[static_cast<size_t>(idx)];
+    long long next_start = static_cast<size_t>(idx) + 1 < F.lines.size() ? F.lines[static_cast<size_t>(idx) + 1].start_ms : line.start_ms + 6000;
+    long long dur = std::max<long long>(1500, std::min<long long>(12000, next_start - line.start_ms));
+    std::vector<std::string> chunks = tt::split_for_display(line.text);
+    if (chunks.empty()) {  // instrumental gap
+        F.shown_line = idx;
+        F.shown_chunk = -1;
+        return;
+    }
+    long long n = static_cast<long long>(chunks.size());
+    int chunk = static_cast<int>(std::max<long long>(0, std::min<long long>(n - 1, (pos - line.start_ms) * n / dur)));
+    if (idx == F.shown_line && chunk == F.shown_chunk) return;
+    if (now - F.last_send_tick < 700) return;  // stay gentle on the device
+    int ttl = static_cast<int>(std::max<long long>(3, std::min<long long>(12, dur / n / 1000 + 2)));
+    std::string err;
+    if (send_to_tomtom(ttl, chunks[static_cast<size_t>(chunk)], err)) {
+        F.shown_line = idx;
+        F.shown_chunk = chunk;
+        F.last_send_tick = now;
+    }
+}
+
+void live_tick() {
+    HWND live = page(PageLive);
+    if (F.mirror && F.mirror->running()) mirror_update_ui();
+    else if (F.mirror && IsWindowVisible(page(PageDisplay))) mirror_update_ui();
+    if (F.webhook.running()) {
+        tt::WebhookServer::Status st = F.webhook.status();
+        label(live, ID_WH_STATUS, "Running. Delivered " + std::to_string(st.delivered) + ", rejected " + std::to_string(st.rejected) +
+                                      (st.last.empty() ? "" : " - last: " + st.last));
+    }
+    if (!F.announce && !F.lyrics_on) return;
+    ULONGLONG now = GetTickCount64();
+    if (now - F.last_poll_tick >= 1000) {
+        F.last_poll_tick = now;
+        poll_spotify(now);
+    }
+    if (F.lyrics_on) lyrics_tick(now);
+}
+
+void shutdown_features() {
+    if (F.mirror) F.mirror->stop();
+    F.webhook.stop();
+}
+
+void create_display_page(HWND p) {
+    mk_label(p, L"Mirror a screen or a single window onto the TomTom's 320x240 display. This is a mirror, not a Windows "
+                L"extended monitor (that needs the separate driver in windows-idd/).", 8, 8, 364, 52);
+    mk_label(p, L"Source:", 8, 70, 60);
+    mk_combo(p, 70, 66, 224, ID_MIR_SRC);
+    mk_button(p, L"Refresh", 300, 65, 72, 24, ID_MIR_REFRESH);
+    mk_label(p, L"Scaling:", 8, 102, 60);
+    HWND fit = mk_combo(p, 70, 98, 224, ID_MIR_FIT);
+    for (const char* f : {"Fit (keep proportions, black bars)", "Fill (crop to the screen shape)", "Stretch"}) add_item(fit, f);
+    SendMessageW(fit, CB_SETCURSEL, 0, 0);
+    mk_button(p, L"Start Mirroring", 8, 134, 176, 28, ID_MIR_START);
+    mk_button(p, L"Stop", 196, 134, 176, 28, ID_MIR_STOP);
+    EnableWindow(child(p, ID_MIR_STOP), FALSE);
+    mk_label(p, L"Not running.", 8, 172, 364, 54, ID_MIR_STATUS);
+    mk_label(p, L"BEFORE YOU START: the TomTom's display receiver (tomtom-display-receiver) must be running and the normal "
+                L"watchface renderer stopped, because both write the same screen memory. Experimental: not yet verified end to end "
+                L"on a real device. Frames go only to the TomTom's USB address (192.168.101.115:18745), at about 9 per second, "
+                L"unencrypted. Nothing is recorded or saved. Windows that block capture will appear black.",
+             8, 236, 364, 150, ID_MIR_WARN);
+    refresh_mirror_sources();
+}
+
+void create_live_page(HWND p) {
+    mk(p, L"BUTTON", L"Notification", BS_GROUPBOX, 8, 2, 364, 90, -1);
+    mk_label(p, L"Message:", 18, 24, 60);
+    mk_edit(p, 82, 20, 176, ID_NF_TEXT, L"Hello from Face Studio");
+    mk_label(p, L"Secs:", 266, 24, 34);
+    mk_spin(p, 302, 20, 62, ID_NF_TTL, ID_NF_TTL_SPIN, 1, 60, 15);
+    mk_button(p, L"Send to TomTom", 18, 48, 130, 24, ID_NF_SEND);
+    mk_label(p, L"Max 32 plain characters; accents are simplified.", 156, 52, 210, 32, ID_NF_STATUS);
+
+    mk(p, L"BUTTON", L"Webhook (other programs can send notifications)", BS_GROUPBOX, 8, 98, 364, 156, -1);
+    mk_check(p, L"Enable", 18, 118, 66, ID_WH_ENABLE);
+    mk_label(p, L"Port:", 92, 120, 34);
+    mk_spin(p, 126, 116, 64, ID_WH_PORT, ID_WH_PORT_SPIN, 1024, 65535, tt::kDefaultWebhookPort);
+    mk_check(p, L"Allow private LAN", 214, 118, 150, ID_WH_LAN);
+    mk_label(p, L"Token:", 18, 148, 44);
+    mk(p, L"EDIT", L"", ES_AUTOHSCROLL | ES_READONLY | WS_TABSTOP, 64, 144, 214, 22, ID_WH_TOKEN, WS_EX_CLIENTEDGE);
+    mk_button(p, L"New token", 284, 143, 80, 24, ID_WH_REGEN);
+    mk(p, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 18, 172, 346, 44, ID_WH_EXAMPLE, WS_EX_CLIENTEDGE);
+    mk_label(p, L"Webhook is off.", 18, 220, 346, 32, ID_WH_STATUS);
+
+    mk(p, L"BUTTON", L"Spotify (desktop app)", BS_GROUPBOX, 8, 260, 364, 214, -1);
+    mk_label(p, L"Spotify is not running.", 18, 280, 346, 18, ID_SP_NOW);
+    mk_check(p, L"Show track changes on the TomTom", 18, 302, 340, ID_SP_ANNOUNCE);
+    mk_check(p, L"Show synced lyrics (looks up artist + title at lrclib.net)", 18, 326, 346, ID_LY_ENABLE);
+    mk_button(p, L"-0.25 s", 18, 352, 70, 24, ID_LY_SLOWER);
+    mk_button(p, L"+0.25 s", 92, 352, 70, 24, ID_LY_FASTER);
+    mk_button(p, L"Restart lyrics", 168, 352, 100, 24, ID_LY_RESTART);
+    mk_label(p, L"Offset +0.00 s", 276, 356, 92, 18, ID_LY_OFFSET);
+    mk_label(p, L"Lyrics off.", 18, 384, 346, 36, ID_LY_STATUS);
+    mk_label(p, L"Track and lyric lines reach the TomTom as short notifications over USB. Position is estimated from when the track "
+                L"started, so seeking drifts - press Restart lyrics. Lyrics are shown line by line and never saved.", 18, 422, 346, 48);
+    set_text(child(p, ID_WH_EXAMPLE), "");
+}
+
 void create_ui(HWND h) {
     S.hwnd = h;
     HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), help = CreatePopupMenu();
@@ -1224,10 +1610,10 @@ void create_ui(HWND h) {
     create_left_panel(h);
     S.canvas_wnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"TTCanvas", L"", WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL, 0, 0, 10, 10, h,
                                    nullptr, S.inst, nullptr);
-    S.tab = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, h,
+    S.tab = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_MULTILINE, 0, 0, 10, 10, h,
                             reinterpret_cast<HMENU>(ID_TAB), S.inst, nullptr);
     SendMessageW(S.tab, WM_SETFONT, reinterpret_cast<WPARAM>(S.font), TRUE);
-    const wchar_t* names[PageCount] = {L"Elements", L"Simulator", L"Data", L"Export", L"Device"};
+    const wchar_t* names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live"};
     for (int i = 0; i < PageCount; ++i) {
         TCITEMW ti{};
         ti.mask = TCIF_TEXT;
@@ -1240,12 +1626,16 @@ void create_ui(HWND h) {
     create_data_page(S.pages[PageData]);
     create_export_page(S.pages[PageExport]);
     create_device_page(S.pages[PageDevice]);
+    create_display_page(S.pages[PageDisplay]);
+    create_live_page(S.pages[PageLive]);
+    load_settings();
     show_page(0);
     S.project = default_project();
     refresh_all_ui();
     layout();
     update_scrollbars();
     SetTimer(h, 1, 1000, nullptr);
+    SetTimer(h, 2, 300, nullptr);
 }
 
 void draw_color_button(const DRAWITEMSTRUCT* dis, Rgb color, bool selected) {
@@ -1377,6 +1767,43 @@ void handle_command(int id, int code, HWND src) {
         case ID_DEV_PING: start_device(0); break;
         case ID_DEV_READ: start_device(1); break;
         case ID_DEV_APPLY: start_device(2); break;
+        case ID_DEV_HOST:
+            if (code == EN_CHANGE) remember_notify_host();
+            break;
+        case ID_MIR_REFRESH: refresh_mirror_sources(); break;
+        case ID_MIR_START: mirror_start(); break;
+        case ID_MIR_STOP: mirror_stop(); break;
+        case ID_NF_SEND: send_test_notification(); break;
+        case ID_WH_ENABLE: webhook_apply(Button_GetCheck(src) == BST_CHECKED); break;
+        case ID_WH_REGEN:
+            F.token = tt::generate_webhook_token();
+            set_text(child(page(PageLive), ID_WH_TOKEN), F.token);
+            if (F.webhook.running()) webhook_apply(true);
+            else { save_settings(); update_webhook_example(); }
+            break;
+        case ID_SP_ANNOUNCE:
+            F.announce = Button_GetCheck(src) == BST_CHECKED;
+            if (!F.announce && !F.lyrics_on) label(page(PageLive), ID_SP_NOW, "Spotify is not being watched.");
+            break;
+        case ID_LY_ENABLE:
+            F.lyrics_on = Button_GetCheck(src) == BST_CHECKED;
+            if (F.lyrics_on) {
+                label(page(PageLive), ID_LY_STATUS, "Waiting for a track...");
+                if (!F.track_key.empty()) start_lyrics_fetch();
+            } else {
+                F.lines.clear();
+                F.lyrics_state.clear();
+                label(page(PageLive), ID_LY_STATUS, "Lyrics off.");
+            }
+            break;
+        case ID_LY_SLOWER: F.offset_ms -= 250; update_offset_label(); break;
+        case ID_LY_FASTER: F.offset_ms += 250; update_offset_label(); break;
+        case ID_LY_RESTART:
+            F.pos_base_ms = 0;
+            F.resume_tick = GetTickCount64();
+            F.shown_line = -2;
+            F.shown_chunk = -1;
+            break;
         case IDM_OPEN: do_open(); break;
         case IDM_SAVE: do_save(false); break;
         case IDM_SAVEAS: do_save(true); break;
@@ -1405,6 +1832,7 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_TIMER: {
+            if (wp == 2) { live_tick(); return 0; }
             ++S.tick;
             if (S.live_clock) {
                 SYSTEMTIME st;
@@ -1454,11 +1882,14 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
         }
         case WM_DEVICE_DONE: on_device_done(reinterpret_cast<DeviceReply*>(lp)); return 0;
+        case WM_LYRICS_DONE: on_lyrics_done(reinterpret_cast<LyricsReply*>(lp)); return 0;
         case WM_CLOSE:
             if (confirm_discard()) DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd, 1);
+            KillTimer(hwnd, 2);
+            shutdown_features();
             PostQuitMessage(0);
             return 0;
     }
