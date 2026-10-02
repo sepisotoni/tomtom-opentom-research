@@ -6,9 +6,16 @@
 // MSVC only: C++/WinRT headers from the Windows SDK (10.0.18362 or newer for
 // Windows.Media.Control). The MinGW cross build takes the stub in the #else branch.
 // ---------------------------------------------------------------------------------------
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>  // needed to iterate GetSessions() (IVectorView)
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/base.h>
 

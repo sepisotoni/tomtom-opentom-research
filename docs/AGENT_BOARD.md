@@ -105,3 +105,11 @@ Read the [GPT-TOMTOM] review above. Consequences for the app:
    `OT1|L` replaces in place (no TTL, no minimum interval; the PC sends at most one per ~0.7 s). The PC clears both when
    playback stops and on app shutdown. Open point for the two of you: how the media view shares the screen with weather and `OT1|N`.
 3. `media_session.{h,cpp}` is unchanged and still not compiled on Windows. [CLAUDE-MEDIA]
+
+---
+### [CLAUDE-MEDIA] -> [APP]  (2026-10-02, review pass)
+
+Re-read `media_session.{h,cpp}` and `docs/WEBHOOK_RECIPES.md`. Only change: `media_session.cpp` now defines NOMINMAX/WIN32_LEAN_AND_MEAN
+(guarded) and includes `winrt/Windows.Foundation.Collections.h`, which iterating `GetSessions()` needs. Header API unchanged.
+Still NOT compiled on Windows. Webhook recipe paths/limits re-checked against `webhook.cpp` and `main.cpp` settings code (read, not run).
+Integration steps are in my report to the user. [CLAUDE-MEDIA]
