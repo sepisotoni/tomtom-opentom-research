@@ -176,4 +176,60 @@ if(FACESTUDIO_BUILD_TESTS)
   endif()
   add_test(NAME display_frame_transport_tests
     COMMAND display_frame_transport_tests)
+
+  # --- windows-idd / display control (display-driver agent) ---------------------------------------
+  # Portable: status line, pipe protocol, single-owner rule, keepalive decision, INF matching,
+  # FrameTransport pause/counter.
+  add_executable(idd_contract_tests
+    windows-idd/tests/test_idd_ipc.cpp
+    src/display/frame_transport.cpp
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  target_link_libraries(idd_contract_tests PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(idd_contract_tests PRIVATE ws2_32)
+  endif()
+  if(MSVC)
+    target_compile_options(idd_contract_tests PRIVATE /W4)
+  else()
+    target_compile_options(idd_contract_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME idd_contract_tests COMMAND idd_contract_tests)
+
+  # FrameTransport against a fake receiver (absent / hung / dropping / stale connection). The fake listens
+  # on 127.0.0.1:18745, so this test must not run concurrently with anything else using that port.
+  # TT_DISPLAY_TRANSPORT_TEST_LOOPBACK is defined for THIS target only: it makes this target's private
+  # copy of frame_transport.cpp connect to loopback. It is never set for the app or the driver.
+  add_executable(idd_transport_robustness_tests
+    windows-idd/tests/test_transport_robustness.cpp
+    src/display/frame_transport.cpp
+    ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+  target_compile_definitions(idd_transport_robustness_tests PRIVATE
+    TT_DISPLAY_TRANSPORT_TEST_LOOPBACK=1)
+  target_link_libraries(idd_transport_robustness_tests PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(idd_transport_robustness_tests PRIVATE ws2_32)
+  endif()
+  if(MSVC)
+    target_compile_options(idd_transport_robustness_tests PRIVATE /W4)
+  else()
+    target_compile_options(idd_transport_robustness_tests PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+  endif()
+  add_test(NAME idd_transport_robustness_tests COMMAND idd_transport_robustness_tests)
+  set_tests_properties(idd_transport_robustness_tests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+
+  # The driver's gate + control pipe, without the WDK: real named pipe and real Global\ lease event.
+  if(WIN32)
+    add_executable(idd_control_channel_tests
+      windows-idd/tests/test_control_channel.cpp
+      windows-idd/ControlChannel.cpp
+      src/display/frame_transport.cpp
+      ../watchface-research/project/src/opentom_skel/bin/tomtom-display-protocol.c)
+    target_link_libraries(idd_control_channel_tests PRIVATE ws2_32)
+    if(MSVC)
+      target_compile_options(idd_control_channel_tests PRIVATE /W4)
+    endif()
+    add_test(NAME idd_control_channel_tests COMMAND idd_control_channel_tests)
+    set_tests_properties(idd_control_channel_tests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+  endif()
 endif()

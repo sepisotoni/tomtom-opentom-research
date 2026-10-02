@@ -1,6 +1,7 @@
 #include "Driver.h"
 
 #include "ControlChannel.h"
+#include "../src/display/idd_ipc.h"
 #include "../src/display/frame_converter.h"
 #include "../src/display/frame_transport.h"
 
@@ -255,6 +256,7 @@ private:
     }
 
     void submit_current_frame() noexcept {
+        last_submit_ = std::chrono::steady_clock::now();
         if (transport_.submit_frame(frame_.data(), frame_.size())) {
             capture_error_reported_ = false;
         } else {
@@ -266,9 +268,18 @@ private:
     // Called every loop iteration and on a timer: when the gate re-opens (Studio mirror stopped, or
     // `resume`), push the last frame at once. A static desktop produces no new swap-chain frames, so
     // without this the TomTom would keep showing the Studio's last mirror frame.
+    //
+    // It is also the keepalive: while streaming is allowed, the last frame is re-sent once a second even
+    // if the desktop is static. That keeps the receiver's 2 s idle timeout from dropping the connection,
+    // repaints a receiver that was restarted, and keeps any device-side "no frames -> restore the clock"
+    // watchdog from firing on an idle desktop. About 150 KB/s over USB; the interval must stay below
+    // half of whatever that watchdog's timeout turns out to be (see docs/AGENT_BOARD.md).
+    // The decision itself is tt::idd_ipc::should_resend_last_frame (unit-tested).
     void service_gate() noexcept {
         const bool allowed = gate_allows();
-        if (allowed && !last_gate_allowed_ && have_frame_) {
+        if (tt::idd_ipc::should_resend_last_frame(
+                allowed, have_frame_, last_gate_allowed_,
+                std::chrono::steady_clock::now() - last_submit_)) {
             submit_current_frame();
         }
         last_gate_allowed_ = allowed;
@@ -338,6 +349,7 @@ private:
     bool capture_error_reported_ = false;
     bool have_frame_ = false;
     bool last_gate_allowed_ = true;
+    std::chrono::steady_clock::time_point last_submit_{};
     std::array<std::uint8_t, tt::display::kFrameBytes> frame_{};
     tt::display::FrameTransport transport_;
 };
