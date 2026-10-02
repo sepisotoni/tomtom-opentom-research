@@ -329,7 +329,7 @@ bool FrameTransport::submit_frame(const std::uint8_t* frame,
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!running_) {
+        if (!running_ || paused_) {
             return false;
         }
         std::copy_n(frame, kFrameBytes, latest_frame_.begin());
@@ -343,6 +343,29 @@ TransportState FrameTransport::state() const noexcept {
     return state_.load();
 }
 
+void FrameTransport::set_paused(bool paused) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (paused_ == paused) {
+            return;
+        }
+        paused_ = paused;
+        if (paused) {
+            has_frame_ = false;  // a frame captured before the pause must not leak out after resume
+        }
+    }
+    wake_.notify_all();
+}
+
+bool FrameTransport::paused() const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return paused_;
+}
+
+std::uint64_t FrameTransport::frames_sent() const noexcept {
+    return frames_sent_.load();
+}
+
 void FrameTransport::run() noexcept {
     Socket socket = kInvalidSocket;
     auto next_send = std::chrono::steady_clock::now();
@@ -350,6 +373,7 @@ void FrameTransport::run() noexcept {
 
     for (;;) {
         std::array<std::uint8_t, kFrameBytes> frame;
+        bool drop_for_pause = false;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             if (socket == kInvalidSocket) {
@@ -358,8 +382,9 @@ void FrameTransport::run() noexcept {
                 const auto idle_deadline = last_activity + kIdleDisconnect;
                 const bool awakened = wake_.wait_until(
                     lock, idle_deadline,
-                    [this] { return !running_ || has_frame_; });
-                if (!awakened && running_ && !has_frame_) {
+                    [this] { return !running_ || has_frame_ || paused_; });
+                // Idle for five seconds, or paused: release the one-client receiver.
+                if (running_ && (paused_ || (!awakened && !has_frame_))) {
                     lock.unlock();
                     close_socket(socket);
                     socket = kInvalidSocket;
@@ -371,14 +396,28 @@ void FrameTransport::run() noexcept {
                 break;
             }
             if (std::chrono::steady_clock::now() < next_send) {
+                // The pacing wait releases the lock, so a pause can land here: wake on it.
                 wake_.wait_until(lock, next_send,
-                                 [this] { return !running_; });
+                                 [this] { return !running_ || paused_; });
                 if (!running_) {
                     break;
                 }
             }
-            frame = latest_frame_;
-            has_frame_ = false;
+            if (paused_) {
+                // Never send a frame captured before the pause; release the receiver instead.
+                has_frame_ = false;
+                drop_for_pause = true;
+            } else {
+                frame = latest_frame_;
+                has_frame_ = false;
+            }
+        }
+
+        if (drop_for_pause) {
+            close_socket(socket);
+            socket = kInvalidSocket;
+            state_.store(TransportState::waiting_for_frame);
+            continue;
         }
 
         if (socket == kInvalidSocket) {
@@ -391,6 +430,7 @@ void FrameTransport::run() noexcept {
             sent = send_frame(socket, frame.data(), next_sequence_++);
         }
         if (sent) {
+            frames_sent_.fetch_add(1);
             last_activity = std::chrono::steady_clock::now();
             next_send = last_activity + kFrameInterval;
             state_.store(TransportState::streaming);
