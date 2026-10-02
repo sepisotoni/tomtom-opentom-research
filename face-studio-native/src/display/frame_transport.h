@@ -37,8 +37,9 @@ public:
     // Pausing makes the worker close its TCP connection to the receiver (so another client, e.g. the
     // Studio's mirror, can use the one-client receiver), discards any pending frame, and rejects new
     // frames until resumed. The flag survives stop()/start() and may be set while stopped. A frame that
-    // is already being sent completes first (bounded by the 2 s I/O deadline). While paused, state()
-    // reports waiting_for_frame; the TransportState enum is unchanged on purpose.
+    // is being sent is aborted (the worker polls every ~50 ms, so the connection is released well under
+    // 100 ms in practice, never the 2 s I/O deadline). While paused, state() reports waiting_for_frame; the
+    // TransportState enum is unchanged on purpose. stop() is bounded the same way.
     void set_paused(bool paused) noexcept;
     bool paused() const noexcept;
 
@@ -54,6 +55,11 @@ private:
     std::thread worker_;
     std::atomic<TransportState> state_{TransportState::stopped};
     std::atomic<std::uint64_t> frames_sent_{0};
+    // True whenever blocking socket work must give up at once: while paused or not running
+    // (invariant: abort_io_ == paused_ || !running_). Polled by the worker every ~50 ms inside
+    // connect/send/ACK waits, so stop() and set_paused(true) never wait out a 2 s I/O deadline.
+    std::atomic<bool> abort_io_{true};
+    std::atomic<bool> reset_pacing_{false};  // worker: forget retry backoff and send the next frame at once
     bool running_ = false;
     bool has_frame_ = false;
     bool paused_ = false;

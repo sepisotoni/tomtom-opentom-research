@@ -8,6 +8,7 @@
 // None of these objects carries a network address and none of them may be bridged to a LAN.
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -192,6 +193,23 @@ inline bool is_ok_reply(std::string_view text) noexcept {
 //   mirror_lease : a Studio mirror lease event currently exists
 constexpr bool streaming_allowed(bool paused, bool mirror_lease) noexcept {
     return !paused && !mirror_lease;
+}
+
+// ---- keepalive ----------------------------------------------------------------------------------
+// While streaming is allowed the driver re-sends its last converted frame at least this often, even if
+// the desktop is static: the receiver drops a client that is silent for 2 s, a restarted receiver must be
+// repainted, and a device-side "no frames -> restore the clock" watchdog must not fire on an idle desktop.
+// Keep it below half of that watchdog's timeout.
+inline constexpr std::chrono::milliseconds kKeepAliveInterval{1000};
+
+// The swap-chain loop asks this on every iteration and on a 250 ms timer.
+//   allowed    : the gate is open (not paused, no Studio lease)
+//   have_frame : at least one frame has been converted
+//   was_allowed: the gate state seen on the previous call (true -> reopening just happened if !was_allowed)
+//   since_last_submit: time since the last submit attempt
+constexpr bool should_resend_last_frame(bool allowed, bool have_frame, bool was_allowed,
+                                        std::chrono::steady_clock::duration since_last_submit) noexcept {
+    return allowed && have_frame && (!was_allowed || since_last_submit >= kKeepAliveInterval);
 }
 
 }  // namespace tt::idd_ipc

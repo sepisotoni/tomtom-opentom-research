@@ -89,6 +89,19 @@ int main() {
     check(!streaming_allowed(false, true), "Studio lease -> must not stream");
     check(!streaming_allowed(true, true), "both -> must not stream");
 
+    // ---- keepalive decision (driver swap-chain loop) -------------------------------------------------
+    {
+        using std::chrono::milliseconds;
+        check(!should_resend_last_frame(false, true, true, milliseconds(5000)), "keepalive: never while the gate is closed");
+        check(!should_resend_last_frame(true, false, true, milliseconds(5000)), "keepalive: nothing to send before the first frame");
+        check(!should_resend_last_frame(true, true, true, milliseconds(999)), "keepalive: not due at 999 ms");
+        check(should_resend_last_frame(true, true, true, milliseconds(1000)), "keepalive: due at 1000 ms");
+        check(should_resend_last_frame(true, true, true, milliseconds(60000)), "keepalive: due after a long idle");
+        check(should_resend_last_frame(true, true, false, milliseconds(0)), "keepalive: gate just reopened -> send at once");
+        check(!should_resend_last_frame(false, true, false, milliseconds(0)), "keepalive: still closed -> nothing");
+        check(kKeepAliveInterval < std::chrono::seconds(2), "keepalive must beat the receiver's 2 s idle timeout");
+    }
+
     // ---- exit codes are part of the documented contract ---------------------------------------
     check(exit_code::ok == 0 && exit_code::internal_error == 1 && exit_code::not_installed == 2 &&
               exit_code::access_denied == 3 && exit_code::device_faulted == 4 && exit_code::usage == 5 &&

@@ -29,11 +29,20 @@
 namespace tt::display {
 namespace {
 
+#ifdef TT_DISPLAY_TRANSPORT_TEST_LOOPBACK
+// Defined ONLY when building tests/test_transport_robustness.cpp (never for the app or the driver) so a
+// test can talk to a fake receiver on this machine. There is no runtime way to change the address.
+constexpr char kTomTomUsbAddress[] = "127.0.0.1";
+#else
 constexpr char kTomTomUsbAddress[] = "192.168.101.115";
+#endif
 constexpr unsigned short kTomTomDisplayPort = 18745;
 constexpr int kIoTimeoutMs = 2000;
 constexpr auto kFrameInterval = std::chrono::milliseconds(110);
 constexpr auto kIdleDisconnect = std::chrono::seconds(5);
+constexpr auto kRetryInitial = std::chrono::milliseconds(500);  // after a failed attempt ...
+constexpr auto kRetryMax = std::chrono::seconds(2);             // ... doubling up to this while the receiver is away
+constexpr int kCancelPollMs = 50;                               // how often blocking waits look at the abort flag
 
 #ifdef _WIN32
 using Socket = SOCKET;
@@ -98,26 +107,57 @@ int remaining_timeout_ms(
         1, milliseconds.count()));
 }
 
-bool wait_socket(Socket socket, bool writable, int timeout_ms) noexcept {
+// Waits for the socket in short slices so `cancel` (stop/pause) is honoured within ~50 ms.
+bool wait_socket(Socket socket, bool writable, int timeout_ms,
+                 const std::atomic<bool>& cancel) noexcept {
+    int remaining = timeout_ms;
+    for (;;) {
+        if (cancel.load()) {
+            return false;
+        }
+        const int slice = std::min(remaining, kCancelPollMs);
 #ifdef _WIN32
-    fd_set descriptors;
-    FD_ZERO(&descriptors);
-    FD_SET(socket, &descriptors);
-    timeval timeout{};
-    timeout.tv_sec = timeout_ms / 1000;
-    timeout.tv_usec = (timeout_ms % 1000) * 1000;
-    return select(0, writable ? nullptr : &descriptors,
-                  writable ? &descriptors : nullptr, nullptr, &timeout) > 0;
+        fd_set descriptors;
+        fd_set failed;
+        FD_ZERO(&descriptors);
+        FD_ZERO(&failed);
+        FD_SET(socket, &descriptors);
+        FD_SET(socket, &failed);
+        timeval timeout{};
+        timeout.tv_sec = slice / 1000;
+        timeout.tv_usec = (slice % 1000) * 1000;
+        // Winsock reports a FAILED non-blocking connect in exceptfds, not writefds: watching it lets a
+        // refused connection (receiver stopped, USB link up) fail at once instead of after the full
+        // timeout. The caller still checks SO_ERROR, so "failed" and "connected" are told apart there.
+        const int ready = select(0, writable ? nullptr : &descriptors,
+                                 writable ? &descriptors : nullptr,
+                                 writable ? &failed : nullptr, &timeout);
+        if (ready > 0) {
+            return true;
+        }
+        if (ready < 0) {
+            return false;
+        }
 #else
-    pollfd descriptor{};
-    descriptor.fd = socket;
-    descriptor.events = writable ? POLLOUT : POLLIN;
-    return poll(&descriptor, 1, timeout_ms) > 0 &&
-           (descriptor.revents & (writable ? POLLOUT : POLLIN)) != 0;
+        pollfd descriptor{};
+        descriptor.fd = socket;
+        descriptor.events = writable ? POLLOUT : POLLIN;
+        const int ready = poll(&descriptor, 1, slice);
+        if (ready > 0) {
+            return (descriptor.revents & (writable ? POLLOUT : POLLIN)) != 0;
+        }
+        if (ready < 0 && errno != EINTR) {
+            return false;
+        }
 #endif
+        remaining -= slice;
+        if (remaining <= 0) {
+            return false;
+        }
+    }
 }
 
-Socket connect_device() noexcept {
+Socket connect_device(const std::atomic<bool>& cancel) noexcept {
     if (!initialize_sockets()) {
         return kInvalidSocket;
     }
@@ -154,7 +194,7 @@ Socket connect_device() noexcept {
         static_cast<int>(sizeof(address)));
     if (result != 0) {
         const int error = last_socket_error();
-        if (!would_block(error) || !wait_socket(socket, true, kIoTimeoutMs)) {
+        if (!would_block(error) || !wait_socket(socket, true, kIoTimeoutMs, cancel)) {
             close_socket(socket);
             return kInvalidSocket;
         }
@@ -178,11 +218,12 @@ Socket connect_device() noexcept {
 
 bool send_all(Socket socket, const std::uint8_t* bytes,
               std::size_t length,
-              std::chrono::steady_clock::time_point deadline) noexcept {
+              std::chrono::steady_clock::time_point deadline,
+              const std::atomic<bool>& cancel) noexcept {
     std::size_t sent = 0;
     while (sent < length) {
         const int timeout_ms = remaining_timeout_ms(deadline);
-        if (timeout_ms == 0 || !wait_socket(socket, true, timeout_ms)) {
+        if (timeout_ms == 0 || !wait_socket(socket, true, timeout_ms, cancel)) {
             return false;
         }
 #ifdef _WIN32
@@ -218,11 +259,12 @@ bool send_all(Socket socket, const std::uint8_t* bytes,
 
 bool receive_all(Socket socket, std::uint8_t* bytes,
                  std::size_t length,
-                 std::chrono::steady_clock::time_point deadline) noexcept {
+                 std::chrono::steady_clock::time_point deadline,
+                 const std::atomic<bool>& cancel) noexcept {
     std::size_t received = 0;
     while (received < length) {
         const int timeout_ms = remaining_timeout_ms(deadline);
-        if (timeout_ms == 0 || !wait_socket(socket, false, timeout_ms)) {
+        if (timeout_ms == 0 || !wait_socket(socket, false, timeout_ms, cancel)) {
             return false;
         }
 #ifdef _WIN32
@@ -258,21 +300,22 @@ std::uint32_t read_u32_le(const std::uint8_t* bytes) noexcept {
 }
 
 bool send_frame(Socket socket, const std::uint8_t* frame,
-                std::uint32_t sequence) noexcept {
+                std::uint32_t sequence,
+                const std::atomic<bool>& cancel) noexcept {
     std::uint8_t header[TOMTOM_DISPLAY_HEADER_SIZE]{};
     tomtom_display_make_header(header, sequence);
     const auto deadline =
         std::chrono::steady_clock::now() +
         std::chrono::milliseconds(kIoTimeoutMs);
 
-    if (!send_all(socket, header, sizeof(header), deadline) ||
-        !send_all(socket, frame, kFrameBytes, deadline)) {
+    if (!send_all(socket, header, sizeof(header), deadline, cancel) ||
+        !send_all(socket, frame, kFrameBytes, deadline, cancel)) {
         return false;
     }
 
     std::uint8_t acknowledgement[TOMTOM_DISPLAY_ACK_SIZE]{};
     return receive_all(socket, acknowledgement, sizeof(acknowledgement),
-                       deadline) &&
+                       deadline, cancel) &&
            acknowledgement[0] == 'T' && acknowledgement[1] == 'T' &&
            acknowledgement[2] == 'A' && acknowledgement[3] == '1' &&
            read_u32_le(acknowledgement + 4) == sequence &&
@@ -293,14 +336,18 @@ bool FrameTransport::start() noexcept {
     try {
         has_frame_ = false;
         running_ = true;
+        abort_io_.store(paused_);
+        reset_pacing_.store(true);
         state_.store(TransportState::waiting_for_frame);
         worker_ = std::thread(&FrameTransport::run, this);
     } catch (const std::system_error&) {
         running_ = false;
+        abort_io_.store(true);
         state_.store(TransportState::unavailable);
         return false;
     } catch (const std::bad_alloc&) {
         running_ = false;
+        abort_io_.store(true);
         state_.store(TransportState::unavailable);
         return false;
     }
@@ -314,6 +361,7 @@ void FrameTransport::stop() noexcept {
             return;
         }
         running_ = false;
+        abort_io_.store(true);  // interrupt a connect / send / ACK wait in progress
     }
     wake_.notify_all();
     if (worker_.joinable()) {
@@ -350,8 +398,11 @@ void FrameTransport::set_paused(bool paused) noexcept {
             return;
         }
         paused_ = paused;
+        abort_io_.store(paused_ || !running_);
         if (paused) {
             has_frame_ = false;  // a frame captured before the pause must not leak out after resume
+        } else {
+            reset_pacing_.store(true);  // resuming: do not sit out a long retry backoff
         }
     }
     wake_.notify_all();
@@ -370,6 +421,7 @@ void FrameTransport::run() noexcept {
     Socket socket = kInvalidSocket;
     auto next_send = std::chrono::steady_clock::now();
     auto last_activity = next_send;
+    auto retry_delay = kRetryInitial;
 
     for (;;) {
         std::array<std::uint8_t, kFrameBytes> frame;
@@ -394,6 +446,10 @@ void FrameTransport::run() noexcept {
             }
             if (!running_) {
                 break;
+            }
+            if (reset_pacing_.exchange(false)) {
+                next_send = std::chrono::steady_clock::now();
+                retry_delay = kRetryInitial;
             }
             if (std::chrono::steady_clock::now() < next_send) {
                 // The pacing wait releases the lock, so a pause can land here: wake on it.
@@ -420,28 +476,44 @@ void FrameTransport::run() noexcept {
             continue;
         }
 
-        if (socket == kInvalidSocket) {
-            state_.store(TransportState::connecting);
-            socket = connect_device();
+        bool sent = false;
+        for (int attempt = 0; attempt < 2 && !sent; ++attempt) {
+            const bool reused = socket != kInvalidSocket;
+            if (!reused) {
+                state_.store(TransportState::connecting);
+                socket = connect_device(abort_io_);
+            }
+            if (socket == kInvalidSocket) {
+                break;
+            }
+            sent = send_frame(socket, frame.data(), next_sequence_++, abort_io_);
+            if (sent) {
+                break;
+            }
+            close_socket(socket);
+            socket = kInvalidSocket;
+            // A failure on a REUSED connection usually means the receiver already dropped it (its idle
+            // timeout is 2 s, ours is 5 s, or it restarted): retry this frame once on a fresh connection
+            // instead of losing it. A failure on a fresh connection is a real failure.
+            if (!reused || abort_io_.load()) {
+                break;
+            }
         }
 
-        bool sent = false;
-        if (socket != kInvalidSocket) {
-            sent = send_frame(socket, frame.data(), next_sequence_++);
-        }
         if (sent) {
             frames_sent_.fetch_add(1);
             last_activity = std::chrono::steady_clock::now();
             next_send = last_activity + kFrameInterval;
+            retry_delay = kRetryInitial;
             state_.store(TransportState::streaming);
+        } else if (abort_io_.load()) {
+            // Interrupted by stop() or a pause, not a receiver failure: no backoff; the top of the loop
+            // decides what happens next (exit, or wait while paused).
+            state_.store(TransportState::waiting_for_frame);
         } else {
-            if (socket != kInvalidSocket) {
-                close_socket(socket);
-                socket = kInvalidSocket;
-            }
             state_.store(TransportState::unavailable);
-            next_send = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(500);
+            next_send = std::chrono::steady_clock::now() + retry_delay;
+            retry_delay = std::min<std::chrono::milliseconds>(retry_delay * 2, kRetryMax);
         }
     }
 
