@@ -13,6 +13,7 @@
 namespace tt::idd {
 
 class SwapChainProcessor;
+class ControlChannel;
 
 class AdapterContext {
 public:
@@ -25,11 +26,15 @@ public:
 private:
     WDFDEVICE device_;
     IDDCX_ADAPTER adapter_;
+    // Decides whether the driver may hold the receiver's single TCP connection and serves
+    // TomTomDisplayControl.exe status/pause/resume. Shared with the swap-chain processors.
+    std::shared_ptr<ControlChannel> control_;
 };
 
 class MonitorContext {
 public:
-    explicit MonitorContext(IDDCX_MONITOR monitor) noexcept;
+    MonitorContext(IDDCX_MONITOR monitor,
+                   std::shared_ptr<ControlChannel> control) noexcept;
     ~MonitorContext();
 
     void set_arrived() noexcept;
@@ -39,6 +44,7 @@ public:
 
 private:
     IDDCX_MONITOR monitor_;
+    std::shared_ptr<ControlChannel> control_;
     std::unique_ptr<SwapChainProcessor> processor_;
     bool arrived_ = false;
 };

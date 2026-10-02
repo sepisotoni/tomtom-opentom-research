@@ -1,5 +1,6 @@
 #include "Driver.h"
 
+#include "ControlChannel.h"
 #include "../src/display/frame_converter.h"
 #include "../src/display/frame_transport.h"
 
@@ -104,12 +105,20 @@ class SwapChainProcessor {
 public:
     SwapChainProcessor(IDDCX_SWAPCHAIN swap_chain,
                        std::shared_ptr<Direct3DDevice> device,
+                       std::shared_ptr<ControlChannel> control,
                        HANDLE frame_event)
         : swap_chain_(swap_chain), device_(std::move(device)),
+          control_(std::move(control)),
           frame_event_(frame_event), stop_event_(CreateEventW(nullptr, TRUE,
                                                                FALSE, nullptr)) {
         if (stop_event_ && transport_.start()) {
             thread_ = CreateThread(nullptr, 0, thread_entry, this, 0, nullptr);
+            if (thread_ && control_) {
+                // From here the control channel pauses/resumes this transport (and releases the
+                // receiver's TCP connection) whenever the Studio holds its mirror lease or the user
+                // ran `TomTomDisplayControl.exe pause`.
+                control_->attach(&transport_);
+            }
         }
     }
 
@@ -121,6 +130,9 @@ public:
             WaitForSingleObject(thread_, INFINITE);
             CloseHandle(thread_);
             thread_ = nullptr;
+        }
+        if (control_) {
+            control_->detach(&transport_);
         }
         if (stop_event_) {
             CloseHandle(stop_event_);
@@ -226,16 +238,40 @@ private:
             frame_.data(), frame_.size());
         device_->context()->Unmap(staging, 0);
         if (converted) {
-            if (transport_.submit_frame(frame_.data(), frame_.size())) {
-                capture_error_reported_ = false;
-            } else {
-                report_capture_error(
-                    L"TomTom IDD: the frame transport is not running.\n");
+            // Keep the converted frame fresh even while streaming is gated (it is only 150 KB),
+            // so the display can be refreshed the moment the gate opens again.
+            have_frame_ = true;
+            if (gate_allows()) {
+                submit_current_frame();
             }
         } else {
             report_capture_error(
                 L"TomTom IDD: BGRA-to-RGB565 frame conversion failed.\n");
         }
+    }
+
+    bool gate_allows() const noexcept {
+        return !control_ || control_->streaming_allowed();
+    }
+
+    void submit_current_frame() noexcept {
+        if (transport_.submit_frame(frame_.data(), frame_.size())) {
+            capture_error_reported_ = false;
+        } else {
+            report_capture_error(
+                L"TomTom IDD: the frame transport is not running.\n");
+        }
+    }
+
+    // Called every loop iteration and on a timer: when the gate re-opens (Studio mirror stopped, or
+    // `resume`), push the last frame at once. A static desktop produces no new swap-chain frames, so
+    // without this the TomTom would keep showing the Studio's last mirror frame.
+    void service_gate() noexcept {
+        const bool allowed = gate_allows();
+        if (allowed && !last_gate_allowed_ && have_frame_) {
+            submit_current_frame();
+        }
+        last_gate_allowed_ = allowed;
     }
 
     void report_capture_error(const wchar_t* message) noexcept {
@@ -248,17 +284,19 @@ private:
     void consume_frames() noexcept {
         auto next_capture = std::chrono::steady_clock::now();
         for (;;) {
+            service_gate();
             IDARG_OUT_RELEASEANDACQUIREBUFFER buffer{};
             auto result = IddCxSwapChainReleaseAndAcquireBuffer(swap_chain_,
                                                                 &buffer);
             if (result == E_PENDING) {
                 HANDLE events[] = {stop_event_, frame_event_};
+                // Wake periodically (not INFINITE) so a gate that re-opens on a static desktop is noticed.
                 const auto wait = WaitForMultipleObjects(
-                    ARRAYSIZE(events), events, FALSE, INFINITE);
+                    ARRAYSIZE(events), events, FALSE, kGateRecheckMs);
                 if (wait == WAIT_OBJECT_0) {
                     break;
                 }
-                if (wait == WAIT_OBJECT_0 + 1) {
+                if (wait == WAIT_OBJECT_0 + 1 || wait == WAIT_TIMEOUT) {
                     continue;
                 }
                 break;
@@ -286,8 +324,11 @@ private:
         }
     }
 
+    static constexpr DWORD kGateRecheckMs = 250;
+
     IDDCX_SWAPCHAIN swap_chain_;
     std::shared_ptr<Direct3DDevice> device_;
+    std::shared_ptr<ControlChannel> control_;
     HANDLE frame_event_;
     HANDLE stop_event_;
     HANDLE thread_ = nullptr;
@@ -295,6 +336,8 @@ private:
     UINT staging_width_ = 0;
     UINT staging_height_ = 0;
     bool capture_error_reported_ = false;
+    bool have_frame_ = false;
+    bool last_gate_allowed_ = true;
     std::array<std::uint8_t, tt::display::kFrameBytes> frame_{};
     tt::display::FrameTransport transport_;
 };
@@ -309,6 +352,22 @@ AdapterContext::AdapterContext(WDFDEVICE device) noexcept
 AdapterContext::~AdapterContext() = default;
 
 NTSTATUS AdapterContext::initialize_adapter() noexcept {
+    if (!control_) {
+        // May run again on a later D0 entry; the channel is created once per adapter object.
+        try {
+            auto channel = std::make_shared<ControlChannel>();
+            if (channel->start()) {
+                control_ = std::move(channel);
+            } else {
+                OutputDebugStringW(
+                    L"TomTom IDD: control channel did not start; streaming is not gated.\n");
+            }
+        } catch (const std::bad_alloc&) {
+            OutputDebugStringW(
+                L"TomTom IDD: out of memory creating the control channel.\n");
+        }
+    }
+
     IDDCX_ADAPTER_CAPS caps{};
     caps.Size = sizeof(caps);
     caps.MaxMonitorsSupported = 1;
@@ -382,7 +441,8 @@ void AdapterContext::report_monitor() noexcept {
     auto* wrapper = WdfObjectGet_MonitorContextWrapper(
         reinterpret_cast<WDFOBJECT>(output.MonitorObject));
     wrapper->context = nullptr;
-    wrapper->context = new (std::nothrow) MonitorContext(output.MonitorObject);
+    wrapper->context =
+        new (std::nothrow) MonitorContext(output.MonitorObject, control_);
     if (!wrapper->context) {
         WdfObjectDelete(reinterpret_cast<WDFOBJECT>(output.MonitorObject));
         return;
@@ -397,8 +457,9 @@ void AdapterContext::report_monitor() noexcept {
     }
 }
 
-MonitorContext::MonitorContext(IDDCX_MONITOR monitor) noexcept
-    : monitor_(monitor) {}
+MonitorContext::MonitorContext(IDDCX_MONITOR monitor,
+                               std::shared_ptr<ControlChannel> control) noexcept
+    : monitor_(monitor), control_(std::move(control)) {}
 
 MonitorContext::~MonitorContext() {
     processor_.reset();
@@ -428,7 +489,7 @@ NTSTATUS MonitorContext::assign_swap_chain(IDDCX_SWAPCHAIN swap_chain,
             return STATUS_UNSUCCESSFUL;
         }
         auto processor = std::make_unique<SwapChainProcessor>(
-            swap_chain, std::move(device), frame_event);
+            swap_chain, std::move(device), control_, frame_event);
         if (processor->valid()) {
             processor_ = std::move(processor);
             return STATUS_SUCCESS;

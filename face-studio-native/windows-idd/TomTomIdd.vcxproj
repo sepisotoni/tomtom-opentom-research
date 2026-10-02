@@ -81,6 +81,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Driver.cpp" />
+    <ClCompile Include="ControlChannel.cpp" />
     <ClCompile Include="..\src\display\frame_converter.cpp" />
     <ClCompile Include="..\src\display\frame_transport.cpp" />
     <ClCompile Include="..\..\watchface-research\project\src\opentom_skel\bin\tomtom-display-protocol.c">
@@ -89,6 +90,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Driver.h" />
+    <ClInclude Include="ControlChannel.h" />
+    <ClInclude Include="OverlappedIo.h" />
+    <ClInclude Include="..\src\display\idd_ipc.h" />
     <ClInclude Include="..\src\display\frame_converter.h" />
     <ClInclude Include="..\src\display\frame_transport.h" />
     <ClInclude Include="..\..\watchface-research\project\src\opentom_skel\bin\tomtom-display-protocol.h" />
