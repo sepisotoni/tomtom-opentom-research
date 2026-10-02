@@ -104,9 +104,10 @@ The driver streams only if `streaming_allowed(paused, mirror_lease) == !paused &
   `acquire()` returns false if somebody else already holds the lease (e.g. a second Studio instance is
   mirroring; `last_error() == ERROR_ALREADY_EXISTS`) — do not start mirroring then.
 * **Mirror start:** `lease.acquire()` → (optional) wait ~300 ms → `FrameTransport::start()`.
-  The driver polls the lease every 200 ms, then drops its TCP connection (immediately if idle; after the frame in
-  flight, ≤ 2 s worst case). `FrameTransport` already retries a refused/stalled connection every 500 ms, so a
-  short overlap heals itself. Waiting for `status` to show `running=0` (≤ 1.5 s) is optional and not required.
+  The driver polls the lease every 200 ms, then drops its TCP connection: an idle connection at once, and a
+  connect/send/ACK wait that is in progress is aborted within ~50 ms (measured 40-50 ms against a hung fake
+  receiver; see Robustness). `FrameTransport` retries a refused/stalled connection with backoff, so a short
+  overlap heals itself. Waiting for `status` to show `running=0` (≤ 1.5 s) is optional and not required.
 * **Mirror stop:** `FrameTransport::stop()` **first**, then `lease.release()` — otherwise the driver could
   grab the connection while the Studio's socket is still open. On release the driver reconnects at the next
   frame and also re-sends its last frame at once, so a static desktop does not leave the Studio's last mirror
@@ -129,7 +130,7 @@ still exists (windows can still be dragged onto it); the TomTom keeps showing wh
 | Second Studio instance starts mirroring | `acquire()` fails (`ERROR_ALREADY_EXISTS`); the first instance is undisturbed |
 | Driver host crashes / restarts | Pause is forgotten (streams again) but a live Studio lease is honoured from the first frame; `status` may briefly give `running=0 frames=0`; `frames` restarts at 0; `pause`/`resume` exit 6 until it is back |
 | `enable` host killed or crashes | Windows removes the device (handle closed) → monitor disappears, `status` → `present=0`; no orphan |
-| Receiver restarts / TomTom unplugged | Existing `FrameTransport` behaviour: reconnect every 500 ms; the driver never needs the Studio to be told |
+| Receiver restarts / TomTom unplugged | `FrameTransport` retries with backoff 0.5 s → 1 s → 2 s (cap), reset on success or resume; a frame sent on a connection the receiver already dropped is retried once on a fresh connection; the driver's 1 s keepalive repaints a restarted receiver even on a static desktop |
 | Control pipe unavailable (name already taken) | Driver logs it and still honours the lease; only `status`/`pause`/`resume` stop working (`running=0`, exit 6) |
 
 ### Control pipe protocol (driver ↔ `TomTomDisplayControl.exe`; the Studio does not need it)
@@ -153,6 +154,138 @@ this correctly.
 * The host stop event (`Global\TomTomFaceStudio.IddDeviceHostStop`) is Administrators/SYSTEM only, so `disable`
   needs elevation.
 * None of this touches TCP 18745's trust model: the receiver stays plain-text and USB-subnet-only.
+
+## Robustness: receiver absent, hung, dropping, or Windows changing modes
+
+Requirement: the driver and the Studio must never block the Windows desktop, leak memory, or let a stopped
+receiver stall Windows. What the code does, what was measured, and what was not:
+
+**Nothing on the desktop path waits for the receiver.** The swap-chain thread only copies a 150 KB frame into the
+transport under a mutex the worker holds for microseconds; all connecting, sending and ACK-waiting happens on
+`FrameTransport`'s own worker thread. A stalled receiver therefore costs dropped frames, not a stalled desktop.
+
+**The one place it could stall Windows was teardown, and it was found and fixed.** `~SwapChainProcessor` runs
+inside the IddCx *unassign swap chain* callback and calls `FrameTransport::stop()`. Connect, send and ACK waits
+could not be interrupted, so with a hung receiver `stop()` blocked for the whole 2 s I/O deadline (up to ~4 s with
+connect + send in sequence). Waits now run in 50 ms slices that poll an abort flag set by `stop()` and by
+`set_paused(true)`. Measured with a fake receiver that follows the real receiver's rules
+(`tests/test_transport_robustness.cpp`), same machine, before → after:
+
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| `stop()` while the receiver accepted the frame but never ACKs | 1991 ms | 40 ms |
+| `pause` releasing that hung connection | 1505 ms | 50 ms |
+| Frame submitted on a connection the receiver had already dropped | **lost** | delivered, 10 ms |
+| Receiver appears after being absent → first frame | 600 ms | ~2.1 s (backoff, cap 2 s) |
+
+Other behaviour, tested the same way: the receiver dropping the connection every 2 frames (streaming continues
+across reconnects, `frames` equals what the receiver ACKed); pause/resume cycles (idle connection released in
+~10 ms, no reconnect while paused, fresh connection on resume); receiver absent (state `unavailable`, no hang,
+`stop()` prompt, streaming starts by itself when the receiver appears).
+
+**Stale connections.** The receiver drops a client that is silent for 2 s; the transport keeps an idle socket for
+5 s. A frame sent in that window used to be lost, and on a desktop that then stays static the TomTom would show
+stale content indefinitely. It is now retried once on a fresh connection, and the driver's **keepalive** (below)
+makes the situation rare.
+
+**Keepalive.** While streaming is allowed the driver re-sends its last converted frame every 1 s even if the
+desktop is static (`tt::idd_ipc::should_resend_last_frame`, unit-tested). It keeps the connection from hitting the
+receiver's 2 s timeout, repaints a restarted receiver, and stops a device-side "no frames → restore the clock"
+watchdog (requested on the board, not implemented yet) from firing on an idle desktop. Cost ≈ 150 KB/s over USB.
+The interval must stay below half of that watchdog's timeout; the device agent has been asked for it.
+
+**Memory.** No allocation per frame in the transport or the driver's frame path; the staging texture is released
+and recreated on a size change; the control channel closes every handle in `stop()`. The transport robustness test
+runs clean under AddressSanitizer + LeakSanitizer + UBSanitizer and under ThreadSanitizer (0 reports) on Linux.
+Not measured on Windows: long-run working-set growth (a soak test on the real driver is still to do).
+
+**Display-mode changes.** The driver advertises exactly one monitor mode and one target mode, 320x240 at the
+configured refresh, so Windows cannot configure another resolution for this monitor. If a surface of a different
+size ever arrives, `convert_bgra8_to_rgb565` validates stride and byte counts and scales by coordinate mapping, so
+the worst outcome is a wrongly scaled picture, never an out-of-bounds read (covered by the existing converter
+tests). A format other than B8G8R8A8 logs one debug line and the frame is skipped; nothing crashes. Topology changes
+elsewhere (other monitors added/removed, sleep/resume) can unassign and reassign the swap chain: the processor is
+torn down promptly (see above), a new one is created, and the frame counter keeps accumulating across them.
+**Not verified:** rotation, HDR, sleep/resume and D0 re-entry on a real IddCx stack.
+
+**What could not be verified here.** (1) Winsock reports a failed non-blocking `connect` in `exceptfds`, not
+`writefds`; `wait_socket` now watches it so a refused connection (receiver stopped, USB link up) should fail at
+once instead of after 2 s. Written from Microsoft's `select` documentation and exercised under Wine only. (2) Any
+real USB behaviour: the receiver has never been run on the TomTom.
+
+## Device display session (`DISPLAY_START` / `DISPLAY_STOP` / `DISPLAY_STATUS`)
+
+[GPT-TOMTOM]'s board review (2026-10-02) says these three commands on TCP 18743 are **not implemented** and that a
+safe version needs one display owner under the existing supervisor, receiver-idle detection, and a return to the
+clock if the PC stops sending. Nothing in the driver depends on them, and the design below means nothing in the
+driver has to change when they land:
+
+* **The Studio is the only host-side controller of the device display session** (fixed commands on 18743,
+  USB-only). The driver and `TomTomDisplayControl.exe` never talk to 18743, so the driver's whole network surface
+  stays the single 18745 stream.
+* **Start:** Studio sends `DISPLAY_START`, waits for `OK`, then streaming begins: mirror = lease + `FrameTransport`;
+  extended display = the driver connects by itself within about a second (keepalive), nothing extra to do.
+* **Stop:** when no sender remains (Studio mirror stopped *and* the driver paused or absent, which the Studio knows
+  from its own state and `TomTomDisplayControl status`), the Studio sends `DISPLAY_STOP`. If the Studio dies
+  without sending it, the device-side watchdog restores the clock after its timeout.
+* **`pause` / `resume`** keep their meaning (host stops/starts sending). For the user toggle, the Studio adds
+  `DISPLAY_STOP` after `pause` when nothing else is streaming, and `DISPLAY_START` before `resume`.
+* **Today** (no `DISPLAY_*`): the receiver is started by hand with the renderer stopped, and the TomTom does not
+  bring its clock back by itself. Nothing above changes that; it only becomes automatic later.
+* If a `session start|stop|status` subcommand on the tool is wanted for manual use, it is ~20 lines once the reply
+  format exists; not written, because the commands do not exist yet and I will not guess their replies.
+
+Questions put to [GPT-TOMTOM] on `docs/AGENT_BOARD.md` (watchdog timeout, idempotency, what `DISPLAY_STATUS`
+reports, listener behaviour on stop, start latency); the answers decide the keepalive interval only.
+
+## Verify on your Windows PC
+
+**A. No driver needed (any Windows PC with the repo and MSVC; ~1 minute of test time).**
+```powershell
+cmake -S face-studio-native -B build -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure -R "idd_" -V
+```
+Expected: `100% tests passed, 0 tests failed out of 3` and these lines in the verbose output:
+`idd contract: 66 checks passed`, `transport robustness: 26 checks passed`, `control channel: 47 checks passed`.
+The robustness test listens on 127.0.0.1:18745 and the control-channel test creates `Global\TomTomFaceStudio.*`
+objects, so close the Studio's mirror and any running `enable` first; CTest runs those two serially. If Windows
+Firewall prompts for the test executable, loopback-only is enough: you can decline.
+
+```powershell
+.\build\Release\TomTomDisplayControl.exe status ; "exit=$LASTEXITCODE"
+.\build\Release\TomTomDisplayControl.exe pause  ; "exit=$LASTEXITCODE"
+.\build\Release\TomTomDisplayControl.exe bogus  ; "exit=$LASTEXITCODE"
+```
+Expected with no driver installed: `present=0 running=0 frames=0` / `exit=0`; then
+`TomTomDisplayControl: the TomTom virtual display device is not present.` / `exit=2`; then the usage text on
+stderr / `exit=5`. (The `.exe` is under `build\Release` for the Visual Studio generator; adjust for yours.)
+
+**B. With the driver on a test-signing machine** (after "Install" below, `enable` running in an elevated window):
+```powershell
+TomTomDisplayControl.exe status      # present=1 running=0 frames=0   (receiver not running, or monitor not extended yet)
+TomTomDisplayControl.exe pause       # no output, exit 0
+TomTomDisplayControl.exe resume      # no output, exit 0
+```
+Start the receiver on the TomTom (renderer stopped), set the new 320x240 monitor to *Extend*, move a window onto it:
+`status` → `present=1 running=1 frames=<n>`, and a second `status` a few seconds later shows a larger `frames`.
+Leave the desktop untouched for 5 s: `frames` still grows by about 1 per second (the keepalive).
+
+**C. The sharing rule.** With B streaming, start mirroring in the Studio: within about a second `status` shows
+`running=0`, the TomTom shows the mirror, and `frames` stops growing. Stop mirroring: within about a second
+`running=1` and `frames` grows again, and the TomTom shows the desktop (no need to touch anything). Kill the Studio
+with Task Manager while mirroring: same recovery, no stuck state.
+
+**D. Robustness on real hardware (not yet done by anyone).**
+1. While streaming, stop the receiver on the TomTom. The Windows desktop must stay fully responsive; `status` keeps
+   `present=1`, `frames` stops growing.
+2. Restart the receiver. Expected: `frames` grows again within about 3 s with no action on the PC.
+3. Unplug the USB cable (the 192.168.101.x interface disappears), wait 10 s, plug it back. Same expectation, and
+   Settings → Display must not hang at any point.
+4. Settings → Display → change the *other* monitors' resolution, or disconnect/reconnect one: the TomTom keeps
+   streaming afterwards. Put the PC to sleep and wake it: streaming resumes. Report anything that does not.
+5. Leave it streaming for an hour and compare the working set of `WUDFHost.exe` (the one hosting TomTomIdd.dll) at
+   the start and end in Task Manager; it should not grow steadily.
 
 ## Install / uninstall / "Remove extended display"
 
@@ -235,24 +368,35 @@ Output is under `face-studio-native\windows-idd\out\x64\Release`. This only buil
 it does not install anything. `TomTomDisplayControl.exe` is also built by the main CMake build (CI) and links
 `cfgmgr32` and `swdevice`; `advapi32` is a default library on MSVC.
 
-Tests (no WDK needed):
+Tests (no WDK needed; all registered in `face-studio-native/CMakeLists.txt` under `FACESTUDIO_BUILD_TESTS`):
 
-* `tests/test_idd_ipc.cpp` — portable: status line, pipe protocol, single-owner rule, INF ownership matching,
-  `FrameTransport` pause/counter. Needs `src/display/frame_transport.cpp` and the protocol `.c` file.
-* `tests/test_control_channel.cpp` — Windows only: the real `ControlChannel` over a real named pipe and a real
+* `tests/test_idd_ipc.cpp` (`idd_contract_tests`) — portable: status line, pipe protocol, single-owner rule, keepalive
+  decision, INF ownership matching, `FrameTransport` pause/counter.
+* `tests/test_transport_robustness.cpp` (`idd_transport_robustness_tests`) — `FrameTransport` against a fake receiver
+  on 127.0.0.1:18745 (hung, dropping, stale connection, absent). Built with `TT_DISPLAY_TRANSPORT_TEST_LOOPBACK`, a
+  compile-time, loopback-only address hook defined for that one target; there is no runtime way to change the
+  transport's address. Needs `src/display/frame_transport.cpp` and the protocol `.c` file.
+* `tests/test_control_channel.cpp` (`idd_control_channel_tests`) — Windows only: the real `ControlChannel` over a real named pipe and a real
   `Global\` lease event, including a silent client, a squatted pipe name, a wrong-typed lease object, and the
   `MirrorLease` helper. Needs `ControlChannel.cpp`, `src/display/frame_transport.cpp`, the protocol `.c` file and
   `ws2_32`.
 
 ## What has and has not been verified
 
-Verified (in a Linux sandbox, not on the owner's Windows machine):
+Verified:
 
-* 58 portable checks (g++ 13, `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror`) plus the project's four
-  existing CTest suites on the modified `FrameTransport`.
-* `ControlChannel.cpp`, `ControlPipeClient.h`, `OverlappedIo.h`, `mirror_lease.h`, `TomTomDisplayControl.cpp`
-  cross-compiled with mingw-w64 13 under the same strict flags; the 47-check control-channel test passed
-  15/15 runs **under Wine 9.0** (Wine is not Windows). A mutation check (breaking lease detection) was caught.
+* **CI, real MSVC (`windows-latest`), commit `274fb53`:** the rewritten `TomTomDisplayControl.cpp` compiled against the
+  genuine `swdevice.h`/`cfgmgr32.h`, the modified `FrameTransport` built, and all test suites that existed then
+  passed. The three new test targets and everything after that commit have **not yet been through CI** at the time of
+  writing this line; check the badge/run for the commit that contains this README.
+* On Linux (g++ 13, `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror`): 66 contract checks and 26 transport
+  robustness checks pass; the robustness test is clean under ASan/LSan/UBSan and TSan; the project's own CMake builds
+  and runs all six suites.
+* `ControlChannel.cpp`, `ControlPipeClient.h`, `OverlappedIo.h`, `mirror_lease.h`, `TomTomDisplayControl.cpp` and the
+  transport cross-compiled with mingw-w64 13 under the same strict flags; the 47-check control-channel test and the
+  26-check robustness test pass **under Wine 9.0** (Wine is not Windows). A mutation check (breaking lease detection)
+  was caught by the control-channel test; the robustness tests were first run against the *unfixed* transport and
+  failed exactly where the review predicted.
 * The CLI's usage handling, exit codes and `status` line under Wine (device absent).
 
 **Not** verified — assume any of these may need a fix on first contact:
@@ -273,7 +417,7 @@ Verified (in a Linux sandbox, not on the owner's Windows machine):
 
 ## Known prototype limitations
 
-- Nearest-neighbour scaling from a CPU-readable staging texture; at most one frame per 100 ms.
+- Nearest-neighbour scaling from a CPU-readable staging texture; at most one new frame per 100 ms plus a 1 s keepalive of the last one.
 - The software device does not outlive its `enable` process (see above); no auto-enable at logon.
 - The TomTom receiver must be started separately with the normal Nano-X renderer stopped; never run both writers
   to `/dev/fb0`. A coordinated start/stop is a device-side request (`DISPLAY_START`/`DISPLAY_STOP`).
