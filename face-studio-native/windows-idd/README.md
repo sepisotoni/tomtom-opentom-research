@@ -385,10 +385,13 @@ Tests (no WDK needed; all registered in `face-studio-native/CMakeLists.txt` unde
 
 Verified:
 
-* **CI, real MSVC (`windows-latest`), commit `274fb53`:** the rewritten `TomTomDisplayControl.cpp` compiled against the
-  genuine `swdevice.h`/`cfgmgr32.h`, the modified `FrameTransport` built, and all test suites that existed then
-  passed. The three new test targets and everything after that commit have **not yet been through CI** at the time of
-  writing this line; check the badge/run for the commit that contains this README.
+* **CI, real MSVC (`windows-latest`):** commit `274fb53` built the rewritten `TomTomDisplayControl.cpp` against the
+  genuine `swdevice.h`/`cfgmgr32.h` and passed the suites that existed. Commit `ac3cc40` ran an unfiltered `ctest`
+  and was green with the three new targets (`idd_contract_tests`, `idd_transport_robustness_tests`,
+  `idd_control_channel_tests`): the unit-test step grew from 5 s to 16 s, which matches the ~10 s robustness test.
+  That is inference: the build log is not readable from where this was written, so the test names were not seen.
+  If this holds, `ControlChannel.cpp` has been compiled by MSVC and its real-named-pipe test has run on real Windows.
+  `Driver.cpp` is still WDK-only and has not been compiled by anything.
 * On Linux (g++ 13, `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror`): 66 contract checks and 26 transport
   robustness checks pass; the robustness test is clean under ASan/LSan/UBSan and TSan; the project's own CMake builds
   and runs all six suites.
