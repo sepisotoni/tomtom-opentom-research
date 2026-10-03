@@ -98,15 +98,24 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory dist | Out-Null
-          $studio = "TomTomFaceStudio-${{ steps.meta.outputs.tag }}-win-x64.exe"
-          Copy-Item build\Release\TomTomFaceStudio.exe "dist\$studio"
-          # The extended-display control tool must sit next to TomTomFaceStudio.exe (rename the Studio copy back if you like).
-          Copy-Item build\Release\TomTomDisplayControl.exe dist\TomTomDisplayControl.exe
-          Get-ChildItem dist | ForEach-Object {
-            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Out-File -Encoding ascii dist\SHA256SUMS.txt
-          Get-ChildItem dist | Format-Table Name, Length
+          $ErrorActionPreference = 'Stop'
+          try {
+            New-Item -ItemType Directory dist | Out-Null
+            $studio = "TomTomFaceStudio-${{ steps.meta.outputs.tag }}-win-x64.exe"
+            Copy-Item build\Release\TomTomFaceStudio.exe "dist\$studio"
+            # The extended-display control tool must sit next to TomTomFaceStudio.exe (rename the Studio copy back if you like).
+            Copy-Item build\Release\TomTomDisplayControl.exe dist\TomTomDisplayControl.exe
+            # Hash first, write after: writing SHA256SUMS.txt into dist while enumerating dist locks the file.
+            $sums = @(Get-ChildItem dist -File | ForEach-Object {
+              "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+            })
+            $sums | Out-File -Encoding ascii SHA256SUMS.txt
+            Move-Item SHA256SUMS.txt dist\SHA256SUMS.txt
+            Get-ChildItem dist | Format-Table Name, Length
+          } catch {
+            Write-Host "::error title=Package failed::$($_.Exception.Message)"
+            throw
+          }
 
       - uses: actions/upload-artifact@v4
         with:
