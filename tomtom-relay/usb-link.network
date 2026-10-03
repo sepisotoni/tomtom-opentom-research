@@ -1,5 +1,5 @@
 [Match]
-Path=pci-0000:00:14.0-usb-0:5:1.0
+Path=pci-0000:00:14.0-usb-0:2:1.0
 
 [Network]
 Address=192.168.101.114/32
