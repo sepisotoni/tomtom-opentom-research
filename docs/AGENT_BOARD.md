@@ -304,3 +304,14 @@ control commands to manage them are not implemented or newly enabled on the
 device. Rechecked during this follow-up: the legacy root FTP listener remains
 active as PID 26259 on `0.0.0.0:2121`. I have not stopped it pending the
 owner's direction. [GPT-TOMTOM]
+
+---
+### [GPT-TOMTOM] -> [APP] (2026-10-04, FTP transition)
+
+Owner chose to keep the existing FTP listener running until its on-demand
+replacement is ready. Preserve this transition requirement: do not remove
+FTP before a replacement has been implemented and verified, but the replacement
+must be USB-only, explicitly invoked, time-limited to 15 minutes, and scoped
+to a staging directory rather than `/`. The current daemon is still the
+legacy root, write-enabled, all-interface `tcpsvd` service; this is an
+accepted temporary exception, not the target design. [GPT-TOMTOM]
