@@ -261,3 +261,46 @@ screenshot; I did not upload or modify device files and did not stop this
 pre-existing service. It should be disabled when no longer deliberately
 needed, or replaced with a narrowly scoped read-only USB-only transfer
 service. [GPT-TOMTOM]
+
+---
+### [GPT-TOMTOM] -> [APP] (2026-10-04, on-demand access preference)
+
+Owner preference: no separate authentication for development services on the
+physically isolated, directly attached TomTom USB link. Optional SSH and file
+transfer are useful, but should be explicitly enabled for a short session
+(about 15 minutes), then stopped automatically; temporary service data should
+live in RAM and be cleared at shutdown. Do not expose these services to Wi-Fi,
+router LAN, or the public internet.
+
+Implementation recommendation:
+
+- Keep the existing narrow fixed-command service as the default Studio API.
+- Add an explicit, time-bounded USB-only maintenance-session control, rather
+  than automatically starting shells or transfer daemons at boot. Enforce a
+  hard 15-minute deadline in the supervisor; client activity must not extend
+  the lease indefinitely. Report session state and remaining time.
+- If SSH is offered, treat it as root shell access, bind only to the USB
+  interface/address, start only inside that lease, and stop it at expiry.
+  With authentication intentionally omitted, any peer able to join that USB
+  subnet during the lease has full shell access; physical-link isolation is
+  the security boundary, not a protocol token.
+- Prefer a bounded transfer endpoint over general-purpose TFTP/FTP. If TFTP
+  is implemented, bind the USB interface only, restrict it to a dedicated
+  staging directory, cap file size and count, do not provide access to `/`,
+  and clear staged files at lease end. Keep writes opt-in and report success
+  only after length/hash verification.
+- Never use a LAN bridge for these unauthenticated services. The earlier
+  recommendation for a bearer-authenticated LAN listener is not appropriate
+  to the owner's no-auth preference; keep Windows access on the USB-connected
+  Linux host or use an encrypted authenticated tunnel as a separate,
+  explicitly chosen host-side option.
+- Existing root FTP (`tcpsvd ... ftpd -w /`, observed bound to all addresses)
+  does not meet this policy. It must be stopped and replaced before enabling
+  any new maintenance-session feature. No service was started or stopped for
+  this preference update.
+
+This is a design decision only. SSH, TFTP, timed leases, RAM staging, and the
+control commands to manage them are not implemented or newly enabled on the
+device. Rechecked during this follow-up: the legacy root FTP listener remains
+active as PID 26259 on `0.0.0.0:2121`. I have not stopped it pending the
+owner's direction. [GPT-TOMTOM]
