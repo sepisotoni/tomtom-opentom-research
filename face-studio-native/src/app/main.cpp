@@ -16,6 +16,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #include <objbase.h>
 #include <wincodec.h>
 
@@ -38,6 +39,8 @@
 #include "lrclib.h"
 #include "mirror.h"
 #include "extdisplay.h"
+#include "capture.h"
+#include "png.h"
 #include "spotify.h"
 #include <memory>
 #include <mutex>
@@ -99,6 +102,8 @@ enum Ids {
     ID_NF_TEXT = 820, ID_NF_TTL, ID_NF_TTL_SPIN, ID_NF_SEND, ID_NF_STATUS,
     ID_WH_ENABLE = 830, ID_WH_PORT, ID_WH_PORT_SPIN, ID_WH_LAN, ID_WH_TOKEN, ID_WH_REGEN, ID_WH_EXAMPLE, ID_WH_STATUS,
     ID_EXT_STATUS = 870, ID_EXT_ADD, ID_EXT_REMOVE, ID_EXT_PAUSE, ID_EXT_RESUME, ID_EXT_NOTE,
+    ID_PIC_SHOT_OPEN = 880, ID_PIC_SHOT_SAVE, ID_PIC_SHOT_PAGE, ID_PIC_SHOT_NOTE, ID_PIC_SHOT_VIEW,
+    ID_PIC_BG_CHOOSE = 890, ID_PIC_BG_FIT, ID_PIC_BG_SAVE_RAW, ID_PIC_BG_SAVE_PNG, ID_PIC_BG_NOTE, ID_PIC_BG_VIEW,
     ID_SP_NOW = 850, ID_SP_ANNOUNCE, ID_LY_ENABLE, ID_LY_SLOWER, ID_LY_FASTER, ID_LY_RESTART, ID_LY_OFFSET, ID_LY_STATUS,
 };
 constexpr UINT WM_DEVICE_DONE = WM_APP + 1;
@@ -106,7 +111,7 @@ constexpr UINT WM_LYRICS_DONE = WM_APP + 2;
 const wchar_t* const kSwatches[8] = {L"#84EBFF", L"#00F5FF", L"#E8DAF2", L"#FF7341", L"#60A5FA", L"#000000", L"#FFFFFF", L"#FF4444"};
 
 enum class Tool { Pencil, Eraser, Bucket, Picker };
-enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PageCount };
+enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PagePictures, PageCount };
 
 struct DeviceReply {
     int kind;  // 0 ping, 1 status, 2 set
@@ -1112,11 +1117,11 @@ void layout() {
 }
 
 void rebuild_tabs() {
-    static const wchar_t* const names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live"};
+    static const wchar_t* const names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live", L"Pictures"};
     TabCtrl_DeleteAllItems(S.tab);
     S.tab_pages.clear();
-    if (S.designer) S.tab_pages = {PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive};
-    else S.tab_pages = {PageDevice, PageDisplay, PageLive};
+    if (S.designer) S.tab_pages = {PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PagePictures};
+    else S.tab_pages = {PageDevice, PageDisplay, PageLive, PagePictures};
     for (size_t i = 0; i < S.tab_pages.size(); ++i) {
         TCITEMW ti{};
         ti.mask = TCIF_TEXT;
@@ -1338,6 +1343,15 @@ void save_settings() {
     WritePrivateProfileStringW(L"webhook", L"port", std::to_wstring(get_int(pg, ID_WH_PORT, tt::kDefaultWebhookPort)).c_str(), f.c_str());
     WritePrivateProfileStringW(L"webhook", L"lan", Button_GetCheck(child(pg, ID_WH_LAN)) == BST_CHECKED ? L"1" : L"0", f.c_str());
     WritePrivateProfileStringW(L"ui", L"designer", S.designer ? L"1" : L"0", f.c_str());
+    {
+        HWND dev = page(PageDevice);
+        std::string host, err;
+        if (parse_device_host(get_text(child(dev, ID_DEV_HOST)), host, err)) {
+            WritePrivateProfileStringW(L"device", L"host", W(host).c_str(), f.c_str());
+            int port = get_int(dev, ID_DEV_PORT, kDefaultDevicePort);
+            if (port >= 1024 && port <= 65535) WritePrivateProfileStringW(L"device", L"port", std::to_wstring(port).c_str(), f.c_str());
+        }
+    }
 }
 
 void load_settings() {
@@ -1352,6 +1366,15 @@ void load_settings() {
     Button_SetCheck(child(pg, ID_WH_LAN), GetPrivateProfileIntW(L"webhook", L"lan", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
     set_text(child(pg, ID_WH_TOKEN), F.token);
     S.designer = GetPrivateProfileIntW(L"ui", L"designer", 0, f.c_str()) != 0;
+    {
+        HWND dev = page(PageDevice);
+        wchar_t hb[64] = L"";
+        GetPrivateProfileStringW(L"device", L"host", L"", hb, 64, f.c_str());
+        std::string host, err;
+        if (hb[0] && parse_device_host(U(hb), host, err)) set_text(child(dev, ID_DEV_HOST), host);  // only private addresses are ever restored
+        int port = static_cast<int>(GetPrivateProfileIntW(L"device", L"port", kDefaultDevicePort, f.c_str()));
+        if (port >= 1024 && port <= 65535) set_int(dev, ID_DEV_PORT, port);
+    }
 }
 
 void remember_notify_host() {
@@ -1747,6 +1770,173 @@ void create_live_page(HWND p) {
     set_text(child(p, ID_WH_EXAMPLE), "");
 }
 
+// ---- pictures: TomTom screenshot viewer and background-picture preparation
+struct Pictures {
+    Bytes shot_raw;
+    int shot_pages = 0;
+    Image shot, bg;
+    bool has_shot = false, has_bg = false;
+} P;
+
+LRESULT CALLBACK PreviewProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_ERASEBKGND: return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            int id = GetDlgCtrlID(hwnd);
+            const Image* img = id == ID_PIC_SHOT_VIEW ? (P.has_shot ? &P.shot : nullptr) : (P.has_bg ? &P.bg : nullptr);
+            HBRUSH back = CreateSolidBrush(RGB(32, 32, 32));
+            FillRect(dc, &rc, back);
+            DeleteObject(back);
+            if (img) {
+                std::vector<uint32_t> px(static_cast<size_t>(img->w) * img->h);
+                for (int y = 0; y < img->h; ++y)
+                    for (int x = 0; x < img->w; ++x) {
+                        Rgb c = img->get(x, y);
+                        px[static_cast<size_t>(y) * img->w + x] = (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | c.b;
+                    }
+                BITMAPINFO bi{};
+                bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+                bi.bmiHeader.biWidth = img->w;
+                bi.bmiHeader.biHeight = -img->h;
+                bi.bmiHeader.biPlanes = 1;
+                bi.bmiHeader.biBitCount = 32;
+                bi.bmiHeader.biCompression = BI_RGB;
+                SetStretchBltMode(dc, COLORONCOLOR);
+                StretchDIBits(dc, 0, 0, rc.right, rc.bottom, 0, 0, img->w, img->h, px.data(), &bi, DIB_RGB_COLORS, SRCCOPY);
+            } else {
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, RGB(170, 170, 170));
+                DrawTextW(dc, L"nothing loaded", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void shot_show_page(int page_index) {
+    HWND pg = page(PagePictures);
+    std::string err;
+    if (!tt::decode_tomtom_capture(P.shot_raw, page_index, P.shot, err)) {
+        P.has_shot = false;
+        label(pg, ID_PIC_SHOT_NOTE, err);
+    } else {
+        P.has_shot = true;
+        label(pg, ID_PIC_SHOT_NOTE, P.shot_pages == 2
+                                         ? "Capture holds two 320x240 pages (a double-buffered screen). Page 1 is normally the picture; "
+                                           "which one was on screen depends on the device at capture time."
+                                         : "One 320x240 page.");
+    }
+    EnableWindow(child(pg, ID_PIC_SHOT_SAVE), P.has_shot);
+    InvalidateRect(child(pg, ID_PIC_SHOT_VIEW), nullptr, FALSE);
+}
+
+void shot_load(const std::wstring& path) {
+    HWND pg = page(PagePictures);
+    std::string err;
+    Bytes raw;
+    if (!tt::read_file(U(path), raw, 1u << 20, err)) {
+        label(pg, ID_PIC_SHOT_NOTE, err);
+        return;
+    }
+    P.shot_pages = tt::capture_page_count(raw.size());
+    P.shot_raw = std::move(raw);
+    HWND combo = child(pg, ID_PIC_SHOT_PAGE);
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < P.shot_pages; ++i) add_item(combo, "Page " + std::to_string(i + 1));
+    if (P.shot_pages > 0) SendMessageW(combo, CB_SETCURSEL, 0, 0);
+    EnableWindow(combo, P.shot_pages > 1);
+    shot_show_page(0);
+}
+
+void shot_open_dialog() {
+    std::wstring path;
+    if (open_dialog(L"Open a TomTom screen capture", L"TomTom capture (*.raw;*.fb;*.bin)\0*.raw;*.fb;*.bin\0All files\0*.*\0\0", path)) shot_load(path);
+}
+
+void shot_save_png() {
+    if (!P.has_shot) return;
+    std::wstring path;
+    if (!save_dialog(L"Save screenshot as PNG", L"PNG image (*.png)\0*.png\0\0", L"png", "tomtom-screenshot.png", path)) return;
+    std::string err;
+    if (!tt::write_file(U(path), tt::png_encode(P.shot), err)) message("Save Failed", err, MB_ICONERROR);
+}
+
+void bg_choose() {
+    HWND pg = page(PagePictures);
+    std::wstring path;
+    if (!open_dialog(L"Choose a background picture", L"Pictures (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0All files\0*.*\0\0", path)) return;
+    RgbaImage img;
+    std::string err;
+    if (!load_image_wic(path, img, err)) {
+        label(pg, ID_PIC_BG_NOTE, "Could not open that picture: " + err);
+        return;
+    }
+    static const char* const kModes[3] = {"cover", "contain", "stretch"};
+    int mode = static_cast<int>(SendMessageW(child(pg, ID_PIC_BG_FIT), CB_GETCURSEL, 0, 0));
+    CanvasModel work("#000000");
+    if (!work.import_background(img, kModes[mode < 0 || mode > 2 ? 0 : mode], 0, 0, err)) {
+        label(pg, ID_PIC_BG_NOTE, "Could not fit that picture: " + err);
+        return;
+    }
+    P.bg = work.image();
+    P.has_bg = true;
+    EnableWindow(child(pg, ID_PIC_BG_SAVE_RAW), TRUE);
+    EnableWindow(child(pg, ID_PIC_BG_SAVE_PNG), TRUE);
+    label(pg, ID_PIC_BG_NOTE, "Ready: 320x240, exactly what the TomTom screen shows. Change the fit and choose the picture again to redo it.");
+    InvalidateRect(child(pg, ID_PIC_BG_VIEW), nullptr, FALSE);
+}
+
+void bg_save_raw() {
+    if (!P.has_bg) return;
+    std::wstring path;
+    if (!save_dialog(L"Save background as RGB565", L"TomTom RGB565 image (*.rgb565)\0*.rgb565\0\0", L"rgb565", "background.rgb565", path)) return;
+    std::string err;
+    if (!tt::write_file(U(path), tt::image_to_rgb565_bytes(P.bg), err)) message("Save Failed", err, MB_ICONERROR);
+}
+
+void bg_save_png() {
+    if (!P.has_bg) return;
+    std::wstring path;
+    if (!save_dialog(L"Save background preview as PNG", L"PNG image (*.png)\0*.png\0\0", L"png", "background-preview.png", path)) return;
+    std::string err;
+    if (!tt::write_file(U(path), tt::png_encode(P.bg), err)) message("Save Failed", err, MB_ICONERROR);
+}
+
+void create_pictures_page(HWND p) {
+    mk(p, L"BUTTON", L"TomTom screenshot viewer", BS_GROUPBOX, 8, 4, 480, 322, -1);
+    mk(p, L"TTPreview", L"", 0, 18, 24, 320, 240, ID_PIC_SHOT_VIEW, WS_EX_CLIENTEDGE);
+    mk_button(p, L"Open capture file...", 348, 24, 130, 26, ID_PIC_SHOT_OPEN);
+    mk_label(p, L"Page:", 348, 62, 40);
+    mk_combo(p, 388, 58, 90, ID_PIC_SHOT_PAGE);
+    EnableWindow(child(p, ID_PIC_SHOT_PAGE), FALSE);
+    mk_button(p, L"Save as PNG...", 348, 90, 130, 26, ID_PIC_SHOT_SAVE);
+    EnableWindow(child(p, ID_PIC_SHOT_SAVE), FALSE);
+    mk_label(p, L"Reads raw captures taken from the TomTom's screen (RGB565, 153,600 or 307,200 bytes). Taking one live "
+                L"needs a device-side screenshot command that does not exist yet.", 348, 124, 134, 136);
+    mk_label(p, L"Open a capture file to look at it.", 18, 270, 462, 48, ID_PIC_SHOT_NOTE);
+
+    mk(p, L"BUTTON", L"Background picture", BS_GROUPBOX, 8, 332, 480, 340, -1);
+    mk(p, L"TTPreview", L"", 0, 18, 352, 320, 240, ID_PIC_BG_VIEW, WS_EX_CLIENTEDGE);
+    mk_button(p, L"Choose picture...", 348, 352, 130, 26, ID_PIC_BG_CHOOSE);
+    mk_label(p, L"Fit:", 348, 392, 30);
+    HWND fit = mk_combo(p, 378, 388, 100, ID_PIC_BG_FIT);
+    for (const char* f : {"Fill (crop)", "Fit (bars)", "Stretch"}) add_item(fit, f);
+    SendMessageW(fit, CB_SETCURSEL, 0, 0);
+    mk_button(p, L"Save as .rgb565...", 348, 420, 130, 26, ID_PIC_BG_SAVE_RAW);
+    mk_button(p, L"Save PNG preview...", 348, 452, 130, 26, ID_PIC_BG_SAVE_PNG);
+    EnableWindow(child(p, ID_PIC_BG_SAVE_RAW), FALSE);
+    EnableWindow(child(p, ID_PIC_BG_SAVE_PNG), FALSE);
+    mk_label(p, L"Prepares any picture for the TomTom screen. Sending it to the device and using it as the face background "
+                L"needs a device-side background setting that does not exist yet.", 348, 488, 134, 110);
+    mk_label(p, L"Choose a picture to prepare it.", 18, 598, 462, 60, ID_PIC_BG_NOTE);
+}
+
 void create_ui(HWND h) {
     S.hwnd = h;
     HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), view = CreatePopupMenu(), help = CreatePopupMenu();
@@ -1784,6 +1974,7 @@ void create_ui(HWND h) {
     create_device_page(S.pages[PageDevice]);
     create_display_page(S.pages[PageDisplay]);
     create_live_page(S.pages[PageLive]);
+    create_pictures_page(S.pages[PagePictures]);
     load_settings();
     S.project = default_project();
     refresh_all_ui();
@@ -1925,6 +2116,14 @@ void handle_command(int id, int code, HWND src) {
         case ID_DEV_HOST:
             if (code == EN_CHANGE) remember_notify_host();
             break;
+        case ID_PIC_SHOT_OPEN: shot_open_dialog(); break;
+        case ID_PIC_SHOT_SAVE: shot_save_png(); break;
+        case ID_PIC_SHOT_PAGE:
+            if (code == CBN_SELCHANGE) shot_show_page(static_cast<int>(SendMessageW(src, CB_GETCURSEL, 0, 0)));
+            break;
+        case ID_PIC_BG_CHOOSE: bg_choose(); break;
+        case ID_PIC_BG_SAVE_RAW: bg_save_raw(); break;
+        case ID_PIC_BG_SAVE_PNG: bg_save_png(); break;
         case ID_MIR_REFRESH: refresh_mirror_sources(); break;
         case ID_MIR_START: mirror_start(); break;
         case ID_MIR_STOP: mirror_stop(); break;
@@ -2050,7 +2249,10 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DEVICE_DONE: on_device_done(reinterpret_cast<DeviceReply*>(lp)); return 0;
         case WM_LYRICS_DONE: on_lyrics_done(reinterpret_cast<LyricsReply*>(lp)); return 0;
         case WM_CLOSE:
-            if (confirm_discard()) DestroyWindow(hwnd);
+            if (confirm_discard()) {
+                save_settings();
+                DestroyWindow(hwnd);
+            }
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd, 1);
@@ -2102,10 +2304,26 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int show) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     if (!RegisterClassExW(&wc)) return 1;
 
+    wc.lpszClassName = L"TTPreview";
+    wc.lpfnWndProc = PreviewProc;
+    wc.hbrBackground = nullptr;
+    if (!RegisterClassExW(&wc)) return 1;
+
     HWND hwnd = CreateWindowExW(WS_EX_CONTROLPARENT, L"TTFaceStudioMain", L"TomTom Face Studio", WS_OVERLAPPEDWINDOW,
                                 CW_USEDEFAULT, CW_USEDEFAULT, D(1180), D(770), nullptr, nullptr, inst, nullptr);
     if (!hwnd) return 1;
     set_title();
+    {   // optional: TomTomFaceStudio.exe --capture <file>  opens a raw TomTom capture in the Pictures tab
+        int argc = 0;
+        wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        for (int i = 1; argv && i + 1 < argc; ++i)
+            if (std::wstring(argv[i]) == L"--capture") {
+                for (size_t t = 0; t < S.tab_pages.size(); ++t)
+                    if (S.tab_pages[t] == PagePictures) { TabCtrl_SetCurSel(S.tab, static_cast<int>(t)); show_page(PagePictures); }
+                shot_load(argv[i + 1]);
+            }
+        if (argv) LocalFree(argv);
+    }
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
 

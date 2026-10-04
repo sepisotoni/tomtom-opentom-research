@@ -19,9 +19,12 @@ The dump itself is NOT in the repo (it contains user data); only conclusions are
 * Settings the OS already exposes: backlight `/sys/class/backlight/s3c/brightness` (+`max_brightness`), CPU governor
   `/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`, suspend `/sys/power/state`, `power-button.cfg`,
   `weather_timezone_offset_minutes`.
-* `/mnt/sdcard/opentom/screenshot-v1.raw` is **307,200 bytes**, but docs/DEVICE_OPERATIONS.md says a 320x240 RGB565 capture
-  is 153,600. 307,200 = 320x240x4 or 320x480x2, so the real framebuffer geometry / depth / channel order is **unverified**
-  (needs `fbset -s` on the device). The display receiver already requires exactly 320x240 RGB565 and checks `/dev/fb0`.
+* `/mnt/sdcard/opentom/screenshot-v1.raw` is **307,200 bytes**. Decoded as little-endian RGB565 it is **two stacked 320x240
+  pages**: the first is a clean picture of the watchface, the second is all black. That fits a 320x480 virtual
+  framebuffer (double buffering), not a 320x240x4 image (that decode is garbage). Which page is on screen depends on the
+  framebuffer's y-offset at capture time, so a device-side `SCREENSHOT` should report it (`FBIOGET_VSCREENINFO`). Derived
+  from this one sample file; unverified on the running device. The Studio's Pictures tab already opens such files
+  (`TomTomFaceStudio.exe --capture <file>` also works) and saves them as PNG.
 * Audio: `espeakdsp` opens `/dev/dsp`, so an OSS device may exist, but the kernel `.config` shipped in the dump enables no
   `CONFIG_SOUND`. Whether `/dev/dsp` exists and plays on this unit is **unverified**.
 
@@ -33,8 +36,8 @@ The dump itself is NOT in the repo (it contains user data); only conclusions are
 | Notifications / webhook | UDP 45872 `OT1\|N\|ttl\|text` | nothing (one message slot) | done |
 | Mirror a window / screen to the TomTom | display receiver TCP 18745 + Studio capture | `DISPLAY_START/STOP` + clock-restore watchdog | GPT, then app |
 | Windows extended monitor | IDD driver + control tool | driver compiled and tried on Windows | display agent, you |
-| **Screenshot of the TomTom screen** | `/dev/fb` is readable | read-only capture endpoint (e.g. `SCREENSHOT` -> one raw frame) after confirming `fbset -s` | GPT, then app (save as PNG) |
-| **Picture as face background** | face renderer + PGM atlases | a `background=` key (RGB565 320x240) loaded by the renderer; a way to put the file on the SD card | GPT; the app already converts any image to RGB565 |
+| **Screenshot of the TomTom screen** | raw file viewer + PNG export in the Studio (Pictures tab) | read-only capture command that returns the *visible* 320x240 page (and its y-offset) | GPT, then the app fetches it |
+| **Picture as face background** | Studio prepares any picture as 320x240 RGB565 (Pictures tab: fill / fit / stretch, `.rgb565` + PNG export) | a `background=` key loaded by the renderer; a way to put the file on the SD card | GPT; then a "Send to TomTom" button |
 | **Brightness / time format / layout / cycling / default face** | sysfs + `watchface.cfg` | fixed commands to read and change them, with validation and a safe reload | GPT, then a Settings tab |
 | **Stream PC audio to the TomTom** | maybe `/dev/dsp` (unverified) | confirm audio works; a PCM receiver on the device; PC side uses WASAPI loopback capture | GPT first (feasibility), then app |
 | Upload files to the device | relay serves assets to the device over HTTP (device pulls) | decide push vs pull; size/hash checks | GPT + app |
@@ -44,7 +47,7 @@ The dump itself is NOT in the repo (it contains user data); only conclusions are
 
 1. On the running device: `ls -l /dev/dsp /dev/mixer /dev/fb*`, `cat /proc/devices`, `dmesg | grep -i -E "audio|sound|i2s|dsp"`,
    `fbset -s`. Is there working PCM output, and at what rates / channels / bit depth (try a short 16-bit mono tone)?
-2. Is `/dev/fb` readable by `tomtom-control`, and what exactly is in `screenshot-v1.raw`?
+2. Is `/dev/fb` readable by `tomtom-control`? `screenshot-v1.raw` decodes as two 320x240 RGB565 pages (see above): confirm the framebuffer is 320x480 virtual and say how to find the visible page.
 3. Can the renderer take a background file (RGB565, 320x240) without a rebuild of every face? If it needs renderer changes,
    propose the `watchface.cfg` key and a safe hot-reload.
 4. Which settings are safe to expose, with limits (brightness range, governor values, which `watchface.cfg` keys)?

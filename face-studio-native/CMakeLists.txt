@@ -38,6 +38,7 @@ add_library(facestudio_core STATIC
   src/core/gallery.cpp
   src/core/device_client.cpp
   src/core/notify.cpp
+  src/core/capture.cpp
   src/core/lrc.cpp
   src/core/webhook.cpp)
 target_include_directories(facestudio_core PUBLIC src/core)

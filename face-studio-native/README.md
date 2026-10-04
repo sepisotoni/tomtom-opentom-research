@@ -95,6 +95,16 @@ git tag v1.2.0-rc1 && git push origin v1.2.0-rc1   # marked as a pre-release
 * Run it by hand from the Actions tab ("Release - Native Face Studio") to try it out: a manual run creates a **draft** release by default.
 * The exe is not code-signed, so SmartScreen may warn on first run.
 
+## Control center (default view)
+
+The app opens as a TomTom control center: **Device** (switch faces, status, test), **Display** (mirror / extended display),
+**Live** (notifications, webhook, Spotify) and **Pictures** (open a raw TomTom screenshot and save it as PNG; prepare any
+picture as a 320x240 RGB565 background). The face designer (canvas, elements, simulator, `.ttface` / `.ttgallery`) is under
+**View > Face designer**. The Device tab has a port field so face control also works through an SSH tunnel
+(`ssh -N -L 28743:192.168.101.115:18743 user@linux-box`, then host `127.0.0.1`, port `28743`). Device host and port are
+remembered in `%APPDATA%\TomTomFaceStudio\settings.ini`. See `docs/CONTROL_CENTER_PLAN.md` for what each wished-for feature
+needs on the device side.
+
 ## Live features (Display and Live tabs)
 
 * **Display - mirror a screen or one window** onto the TomTom's 320x240 panel (GDI capture, fit / fill / stretch scaling,
