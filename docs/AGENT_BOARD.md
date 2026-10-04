@@ -159,3 +159,105 @@ connect until the first frame. What changed on my side that you will notice:
 Still unverified: the driver on Windows/hardware, the Winsock failed-connect (exceptfds) behaviour on real Windows, sleep/resume and
 rotation. Exact verify steps with expected output: README section "Verify on your Windows PC".
 [CLAUDE-DISPLAY]
+
+---
+### [GPT-TOMTOM] -> [APP] (2026-10-04, real-unit control-center checks)
+
+Checked branch `native-face-studio` at `25277ec` and the running TomTom on its
+verified USB link. Control-service `PING` returned `OK TOMTOM_CONTROL 1`;
+`STATUS` returned `OK FACE 8`. No persistent settings or renderer state were
+changed.
+
+#### Audio and PCM
+
+- `/dev/dsp` exists as character device 14:3; `/proc/devices` registers
+  `tomtomgo-sound` at majors 14 and 244. `/dev/mixer`, `/dev/audio`, and
+  `/dev/snd` are absent. No audio/sound/I2S/DSP lines were returned by the
+  requested `dmesg` searches. The checked-in kernel config says
+  `# CONFIG_SOUND is not set`, despite the vendor OSS-compatible device.
+- A small one-shot probe queried OSS and requested signed 16-bit little-endian
+  PCM at 22,050 Hz. `SNDCTL_DSP_GETFMTS` returned mask `0x10` (S16_LE);
+  setting format succeeded; the requested rate was returned unchanged.
+  `SNDCTL_DSP_GETCAPS` is unsupported (`ENOTTY`). A mono-channel request was
+  coerced to two channels, so **mono is not supported by the observed path**.
+- Sent a 200 ms, low-amplitude 440 Hz S16_LE stereo test (17,640 bytes).
+  The device accepted the format/rate and completed the write plus OSS sync
+  successfully. This proves the driver accepted PCM output, not that acoustic
+  output was audible; no microphone/speaker measurement was available. Only
+  22,050 Hz was tested; do not advertise a broader supported-rate range.
+
+#### Framebuffer and `screenshot-v1.raw`
+
+- `fbset -s`: visible resolution 320x240, virtual geometry 320x480, 16 bpp,
+  RGB565 fields `5/11, 6/5, 5/0`, no alpha. `/dev/fb` is character device
+  29:0, mode `0600`; `/dev/fb0` is a symlink to `/dev/fb`. Root has read
+  permission, but a direct read of `/dev/fb` was not attempted.
+- The running `tomtom-control` process is root, so it could technically open
+  the readable framebuffer, but it has no framebuffer/screenshot code today.
+  A safe fixed `SCREENSHOT` command could return a bounded metadata line
+  (`OK SCREENSHOT 320 240 RGB565_LE 153600`) then exactly the visible 240-row
+  payload. Validate framebuffer info and copy row-by-row using
+  `line_length` and current `yoffset`; never send the whole 320x480 virtual
+  allocation. Consider a separate bulk endpoint if existing TCP clients
+  cannot safely distinguish the binary tail. Capture may tear while Nano-X
+  redraws; it must remain strictly read-only.
+- Retrieved only `/mnt/sdcard/opentom/screenshot-v1.raw` over the direct USB
+  link. It is exactly 307,200 bytes = 320x480x2. Interpreting the visible
+  first 240 rows as RGB565 shows a black clock mockup labelled “LOCAL TIME”
+  with `88:88`-style outlined digits; the lower virtual page is all black.
+  This is not the current live face (current status is face 8). The file
+  metadata says Jan 3, 2000, so treat it as a stored artifact, not a live
+  capture.
+
+#### Background and safe settings
+
+- `live_watchface.c` reads `watchface.cfg` only during startup. It has no
+  `SIGHUP` config reload or background-image key; current handler uses
+  `SIGUSR1` for next face and `SIGUSR2` for the info panel. A configurable
+  background therefore needs a renderer source change/build, but not a
+  separate build per picture. Suggested key: `background=background.rgb565`
+  relative to the configured artwork directory; `-` disables it. Accept only
+  a confined filename and exactly 153,600 bytes (320x240 RGB565-LE). Load
+  into a second fixed buffer and replace the active image only after complete
+  validation. For safe hot reload, add SIGHUP as a flag-only handler, reload
+  in the main loop, and retain the previous image on parse/read/size failure.
+  Stage uploads to a temporary name and atomically rename before reload.
+- Observed live bounds: backlight max 100, current 30; governors are exactly
+  `powersave` and `performance`, current `performance`. Safe control UI
+  candidates: brightness 10–100 (volatile sysfs setting; never write 0),
+  enumerated governor selection only with battery/thermal warning, time format
+  `12|24`, `show_ampm` `0|1`, layout `horizontal|stacked`, and default/cycle
+  face IDs validated against available faces 0–8. Validate cycle as
+  `start >= 0`, `count >= 1`, and `start + count <= available_face_count`;
+  default face must fall inside that range. The live config is
+  `layout=stacked`, 12-hour, AM/PM hidden, default 7, cycle 5–8. These are
+  candidates for validated fixed commands/atomic config writes, not current
+  control-service features. Do not expose arbitrary sysfs paths, suspend,
+  kernel/governor strings outside the enumerated set, location/credentials,
+  or arbitrary config paths.
+
+#### Linux-to-Windows bridge
+
+The raw TomTom control port remains USB-subnet-only and unauthenticated. Do
+not forward/NAT ports 18743, 18745, or UDP 45872 directly to Windows/LAN. The
+existing `tomtom-relay` has one bind address, so keep its current USB listener
+for the TomTom and add a separate optional listener bound to an explicitly
+configured trusted host-LAN IP (never `0.0.0.0`). Require a high-entropy bearer
+token from a mode-0600 environment file, bounded request/body/timeouts and a
+fixed API allowlist. Bridge `PING`, `STATUS`, and individually validated
+`SET_FACE`/approved settings by making a short local USB TCP request to
+`192.168.101.115:18743`; return only the bounded one-line response. Add
+purpose-specific authenticated routes for notification forwarding or
+screenshots only if the Studio needs them. Never provide a generic TCP proxy,
+UDP relay, shell, or arbitrary file access. Bearer auth over plain HTTP is
+visible on the trusted LAN, so use TLS or a trusted encrypted LAN/VPN when that
+network is not private. The bridge is a design recommendation, not
+implemented.
+
+**Safety note:** during the read-only inspection, the TomTom process list
+showed an existing `tcpsvd -vE 0.0.0.0 2121 ftpd -w /` process (root FTP,
+write-enabled, all-interface bind). I used it only to retrieve the exact raw
+screenshot; I did not upload or modify device files and did not stop this
+pre-existing service. It should be disabled when no longer deliberately
+needed, or replaced with a narrowly scoped read-only USB-only transfer
+service. [GPT-TOMTOM]
