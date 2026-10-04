@@ -315,3 +315,55 @@ must be USB-only, explicitly invoked, time-limited to 15 minutes, and scoped
 to a staging directory rather than `/`. The current daemon is still the
 legacy root, write-enabled, all-interface `tcpsvd` service; this is an
 accepted temporary exception, not the target design. [GPT-TOMTOM]
+
+---
+### [GPT-TOMTOM] -> [APP] (2026-10-04, SSH and remote video clarification)
+
+Owner wants SSH available persistently using the existing device credentials,
+does not want TFTP, and wants the Studio to start/stop video display remotely.
+Live USB inspection:
+
+- Dropbear executable exists at `/mnt/sdcard/opentom/bin/dropbear`, but no
+  Dropbear/SSH daemon is running. No valid SSH credentials were verified.
+- `telnetd -F` is running; the observed root login reached a shell without a
+  password prompt. The existing root write-enabled FTP service is also still
+  active on `0.0.0.0:2121`.
+- `/proc/bus/input/devices` currently lists a touchscreen (`event0`). The
+  configured power button is handled through the GPIO service, not an evdev
+  key: <=250 ms runs `watchface-toggle-info`, >=400 ms suspends, and the
+  interval between those durations is a no-op.
+
+Protocol recommendation:
+
+- The Studio should send fixed, bounded JSON control requests (for example,
+  `POST /v1/display/session` with `{"action":"start"}` or `stop`) over HTTPS to
+  the Linux host bridge. HTTP headers carry content type and transport auth;
+  commands belong in the JSON body.
+- Keep video pixels out of headers and JSON/base64. Use a separate binary WSS
+  stream (or equivalent binary channel) through the host bridge. The bridge
+  forwards unchanged TTDP frames over direct USB to the device's existing
+  TCP `18745` receiver. The Windows app's possible Internet path is to the
+  host bridge; do not open the TomTom's unauthenticated ports to the Internet.
+- HTTPS provides encryption, not client identity. A remote bridge needs
+  authenticated host/VPN access or strong client authentication. This does
+  not add a token to the isolated USB device protocol. The current user has
+  not approved or selected a public hosting/auth design.
+- Make start/stop idempotent and coordinate a single device-side display
+  supervisor. Explicit stop or a 4-second frame timeout should stop the
+  receiver and restore Nano-X; 4 seconds is above the reported 1-second IDD
+  keepalive plus margin. Receiver watchdog and ownership control are not yet
+  implemented or device-tested.
+
+For Shorts/media, prefer Windows-side decode/capture and low-resolution frame
+streaming rather than native YouTube on the ARM device. The device receiver
+supports only 320x240 RGB565 at up to 10 fps; direct YouTube fetch/decode is
+not implemented. Hardware PCM accepted S16_LE stereo at 22,050 Hz, but actual
+audibility has not been confirmed. Reuse physical buttons only after testing;
+preserve long-press suspend, as the current quick-press action opens the
+watchface info panel.
+
+SSH persistence is not enabled yet: current root auth state/credentials were
+not verified, and the current Telnet service already grants a shell on the
+observed login. The user requests existing SSH credentials; do not invent,
+reveal, or silently change them. No SSH daemon, bridge, video receiver, or
+media service was started or modified for this design note. [GPT-TOMTOM]

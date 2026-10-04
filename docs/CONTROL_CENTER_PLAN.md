@@ -62,3 +62,68 @@ refuses non-private addresses. If the TomTom is cabled to a Linux box instead of
   on the Linux box (token required, fixed commands only, bound to a trusted LAN address), the same model as the existing
   `tomtom-relay`. That is device-side/Linux work for [GPT-TOMTOM]; the Studio will then get a "connect via bridge" option.
 * Do not port-forward or NAT the raw device ports to the LAN: they are plain text and unauthenticated.
+
+## Owner clarification (2026-10-04): access and video path
+
+The owner prefers always-on SSH using the device's existing credentials, does
+not want TFTP, and would like Studio to start/stop video display remotely.
+This is a preference, not an installed configuration. The live device check
+found the Dropbear executable in `/mnt/sdcard/opentom/bin/dropbear`, but no
+Dropbear process was running. `telnetd` was running, and the observed root
+Telnet login reached a shell without a password prompt; no verified SSH
+credential or root-password state was established. Do not claim SSH is
+currently available or reuse an unverified/blank root credential.
+
+Recommended network split:
+
+1. Keep the TomTom-facing raw interfaces on the direct USB subnet only.
+   Retain TCP `18745` and the existing `TTDP` binary frame format between the
+   Linux bridge and device; there is no technical need to change the device
+   receiver to port `10000`.
+2. The Studio sends a bounded JSON command such as
+   `POST /v1/display/session` with `{"action":"start"}` or `{"action":"stop"}`
+   to the Linux host over HTTPS. HTTP headers carry transport metadata
+   (`Content-Type`, authorization); they are not a place to encode display
+   commands or frame data. The bridge maps only fixed allowlisted actions to
+   the narrow USB control service.
+3. Send video as a separate binary WebSocket stream (`wss://.../v1/display/frames`)
+   or equivalent bounded binary upload, not as JSON/base64 or HTTP headers.
+   The host validates the session and forwards the existing fixed-size frames
+   over USB to TCP `18745`. A 320x240 RGB565 stream at 10 fps is about
+   1.54 MB/s before transport overhead.
+4. For remote Internet use, require an authenticated encrypted path to the
+   Linux host (prefer a private VPN such as the owner's existing trusted
+   network/VPN, or a public HTTPS endpoint with strong per-client
+   authentication, rate limits, and request bounds). HTTPS encrypts traffic
+   but does not authenticate a client by itself. Do not expose the device's
+   unauthenticated ports or permit an unauthenticated Internet relay. This
+   host-side identity does not require adding a token to the isolated USB
+   device protocol.
+5. The device display supervisor must own Nano-X and the receiver
+   exclusively. `start`/`stop` are idempotent; explicit stop or a receiver
+   silence timeout stops the receiver and restores the clock. The Windows IDD
+   agent reports a 1-second keepalive, so a proposed frame timeout is 4
+   seconds (above 2.5 seconds of expected gap). This is a design proposal,
+   not an implemented or physically tested watchdog.
+
+The present physical-button configuration maps a quick press (up to 250 ms)
+to `watchface-toggle-info` and a long press (at least 400 ms) to suspend;
+the 250–400 ms interval has no action. The touchscreen is exposed as
+`event0`, but the owner reports unreliable screen taps. A future media view
+could map safe button gestures to previous/play/next, but should preserve the
+long-press suspend behavior and be validated against real button events before
+changing policy.
+
+YouTube Shorts should not be implemented as native YouTube playback on this
+TomTom yet. A plausible prototype is for Windows to decode/capture an
+owner-selected PC window/video and stream downscaled frames (and optionally
+PCM audio) through the authenticated host bridge. The TomTom is only 320x240;
+the current receiver tops out at 10 fps and has no video decoder. This would
+show the PC's video on the device, not make the device independently browse
+YouTube. The device audio test accepted S16_LE stereo at 22,050 Hz, but
+audible speaker output was not confirmed. On-device short-video fetching,
+decoding, and YouTube navigation remain unverified and out of scope until
+hardware/input and resource tests support them.
+
+No SSH, bridge listener, media player, or new display-session service was
+enabled by this clarification.
