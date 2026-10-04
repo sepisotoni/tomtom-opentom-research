@@ -104,14 +104,19 @@ enum Ids {
     ID_EXT_STATUS = 870, ID_EXT_ADD, ID_EXT_REMOVE, ID_EXT_PAUSE, ID_EXT_RESUME, ID_EXT_NOTE,
     ID_PIC_SHOT_OPEN = 880, ID_PIC_SHOT_SAVE, ID_PIC_SHOT_PAGE, ID_PIC_SHOT_NOTE, ID_PIC_SHOT_VIEW,
     ID_PIC_BG_CHOOSE = 890, ID_PIC_BG_FIT, ID_PIC_BG_SAVE_RAW, ID_PIC_BG_SAVE_PNG, ID_PIC_BG_NOTE, ID_PIC_BG_VIEW,
+    ID_AU_ON0 = 900, ID_AU_TIME0 = 910, ID_AU_FACE0 = 920, ID_AU_ROT_ON = 930, ID_AU_ROT_MIN, ID_AU_ROT_SPIN,
+    ID_AU_ROT_FACE0 = 940, ID_AU_LAUNCH_ON = 950, ID_AU_LAUNCH_FACE, ID_AU_TRAY, ID_AU_RUN, ID_AU_STATUS,
+    IDM_TRAY_OPEN = 960, IDM_TRAY_EXIT,
     ID_SP_NOW = 850, ID_SP_ANNOUNCE, ID_LY_ENABLE, ID_LY_SLOWER, ID_LY_FASTER, ID_LY_RESTART, ID_LY_OFFSET, ID_LY_STATUS,
 };
 constexpr UINT WM_DEVICE_DONE = WM_APP + 1;
 constexpr UINT WM_LYRICS_DONE = WM_APP + 2;
+constexpr UINT WM_AUTO_DONE = WM_APP + 3;
+constexpr UINT WM_TRAYICON = WM_APP + 4;
 const wchar_t* const kSwatches[8] = {L"#84EBFF", L"#00F5FF", L"#E8DAF2", L"#FF7341", L"#60A5FA", L"#000000", L"#FFFFFF", L"#FF4444"};
 
 enum class Tool { Pencil, Eraser, Bucket, Picker };
-enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PagePictures, PageCount };
+enum Page { PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PagePictures, PageAuto, PageCount };
 
 struct DeviceReply {
     int kind;  // 0 ping, 1 status, 2 set
@@ -158,6 +163,18 @@ struct AppState {
 } S;
 
 int D(int v) { return MulDiv(v, S.dpi, 96); }
+
+// "HH:MM" (24-hour) -> minutes since midnight.
+bool parse_hhmm(const std::string& t, int& minutes) {
+    if (t.size() != 5 || t[2] != ':') return false;
+    for (int i : {0, 1, 3, 4})
+        if (t[static_cast<size_t>(i)] < '0' || t[static_cast<size_t>(i)] > '9') return false;
+    int h = (t[0] - '0') * 10 + (t[1] - '0'), m = (t[3] - '0') * 10 + (t[4] - '0');
+    if (h > 23 || m > 59) return false;
+    minutes = h * 60 + m;
+    return true;
+}
+
 
 HWND mk(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id, DWORD ex = 0) {
     HWND c = CreateWindowExW(ex, cls, text, WS_CHILD | WS_VISIBLE | style, D(x), D(y), D(w), D(h), parent,
@@ -1117,11 +1134,11 @@ void layout() {
 }
 
 void rebuild_tabs() {
-    static const wchar_t* const names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live", L"Pictures"};
+    static const wchar_t* const names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live", L"Pictures", L"Auto"};
     TabCtrl_DeleteAllItems(S.tab);
     S.tab_pages.clear();
-    if (S.designer) S.tab_pages = {PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive, PagePictures};
-    else S.tab_pages = {PageDevice, PageDisplay, PageLive, PagePictures};
+    if (S.designer) S.tab_pages = {PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive};
+    else S.tab_pages = {PageDevice, PageAuto, PageDisplay, PageLive, PagePictures};
     for (size_t i = 0; i < S.tab_pages.size(); ++i) {
         TCITEMW ti{};
         ti.mask = TCIF_TEXT;
@@ -1344,6 +1361,24 @@ void save_settings() {
     WritePrivateProfileStringW(L"webhook", L"lan", Button_GetCheck(child(pg, ID_WH_LAN)) == BST_CHECKED ? L"1" : L"0", f.c_str());
     WritePrivateProfileStringW(L"ui", L"designer", S.designer ? L"1" : L"0", f.c_str());
     {
+        HWND au = page(PageAuto);
+        for (int i = 0; i < 4; ++i) {
+            std::wstring sec = L"auto" + std::to_wstring(i);
+            WritePrivateProfileStringW(sec.c_str(), L"on", Button_GetCheck(child(au, ID_AU_ON0 + i)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+            WritePrivateProfileStringW(sec.c_str(), L"time", W(get_text(child(au, ID_AU_TIME0 + i))).c_str(), f.c_str());
+            WritePrivateProfileStringW(sec.c_str(), L"face", std::to_wstring(static_cast<int>(SendMessageW(child(au, ID_AU_FACE0 + i), CB_GETCURSEL, 0, 0))).c_str(), f.c_str());
+        }
+        unsigned mask = 0;
+        for (int i = 0; i < kDeviceFaceCount; ++i)
+            if (Button_GetCheck(child(au, ID_AU_ROT_FACE0 + i)) == BST_CHECKED) mask |= 1u << i;
+        WritePrivateProfileStringW(L"rotate", L"on", Button_GetCheck(child(au, ID_AU_ROT_ON)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+        WritePrivateProfileStringW(L"rotate", L"minutes", std::to_wstring(get_int(au, ID_AU_ROT_MIN, 10)).c_str(), f.c_str());
+        WritePrivateProfileStringW(L"rotate", L"mask", std::to_wstring(mask).c_str(), f.c_str());
+        WritePrivateProfileStringW(L"launch", L"on", Button_GetCheck(child(au, ID_AU_LAUNCH_ON)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+        WritePrivateProfileStringW(L"launch", L"face", std::to_wstring(static_cast<int>(SendMessageW(child(au, ID_AU_LAUNCH_FACE), CB_GETCURSEL, 0, 0))).c_str(), f.c_str());
+        WritePrivateProfileStringW(L"tray", L"keep", Button_GetCheck(child(au, ID_AU_TRAY)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+    }
+    {
         HWND dev = page(PageDevice);
         std::string host, err;
         if (parse_device_host(get_text(child(dev, ID_DEV_HOST)), host, err)) {
@@ -1374,6 +1409,28 @@ void load_settings() {
         if (hb[0] && parse_device_host(U(hb), host, err)) set_text(child(dev, ID_DEV_HOST), host);  // only private addresses are ever restored
         int port = static_cast<int>(GetPrivateProfileIntW(L"device", L"port", kDefaultDevicePort, f.c_str()));
         if (port >= 1024 && port <= 65535) set_int(dev, ID_DEV_PORT, port);
+    }
+    {
+        HWND au = page(PageAuto);
+        for (int i = 0; i < 4; ++i) {
+            std::wstring sec = L"auto" + std::to_wstring(i);
+            Button_SetCheck(child(au, ID_AU_ON0 + i), GetPrivateProfileIntW(sec.c_str(), L"on", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
+            wchar_t tb[16] = L"";
+            GetPrivateProfileStringW(sec.c_str(), L"time", L"", tb, 16, f.c_str());
+            int dummy;
+            if (parse_hhmm(U(tb), dummy)) set_text(child(au, ID_AU_TIME0 + i), U(tb));
+            int face = static_cast<int>(GetPrivateProfileIntW(sec.c_str(), L"face", -1, f.c_str()));
+            if (is_valid_face_id(face)) SendMessageW(child(au, ID_AU_FACE0 + i), CB_SETCURSEL, static_cast<WPARAM>(face), 0);
+        }
+        unsigned mask = static_cast<unsigned>(GetPrivateProfileIntW(L"rotate", L"mask", 0, f.c_str()));
+        for (int i = 0; i < kDeviceFaceCount; ++i) Button_SetCheck(child(au, ID_AU_ROT_FACE0 + i), (mask >> i) & 1u ? BST_CHECKED : BST_UNCHECKED);
+        Button_SetCheck(child(au, ID_AU_ROT_ON), GetPrivateProfileIntW(L"rotate", L"on", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
+        int mins = static_cast<int>(GetPrivateProfileIntW(L"rotate", L"minutes", 10, f.c_str()));
+        set_int(au, ID_AU_ROT_MIN, std::max(1, std::min(240, mins)));
+        Button_SetCheck(child(au, ID_AU_LAUNCH_ON), GetPrivateProfileIntW(L"launch", L"on", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
+        int lface = static_cast<int>(GetPrivateProfileIntW(L"launch", L"face", 7, f.c_str()));
+        if (is_valid_face_id(lface)) SendMessageW(child(au, ID_AU_LAUNCH_FACE), CB_SETCURSEL, static_cast<WPARAM>(lface), 0);
+        Button_SetCheck(child(au, ID_AU_TRAY), GetPrivateProfileIntW(L"tray", L"keep", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
     }
 }
 
@@ -1937,6 +1994,244 @@ void create_pictures_page(HWND p) {
     mk_label(p, L"Choose a picture to prepare it.", 18, 598, 462, 60, ID_PIC_BG_NOTE);
 }
 
+// ---- automation: scheduled / rotating faces, and running quietly in the tray
+// Only ever uses the existing, validated SET_FACE command through the same device client as the Device tab.
+struct AutoReply {
+    int face;
+    std::string why;
+    DeviceResult result;
+};
+
+struct Automation {
+    ULONGLONG start_tick = 0, last_apply_tick = 0, last_rotate_tick = 0;
+    int last_fire_key[4] = {-1, -1, -1, -1};
+    int last_applied = -1;
+    int last_rotated = -1;
+    bool launch_done = false, schedule_dirty = true, busy = false;
+    bool exiting = false, in_tray = false;
+    std::string status;
+} A;
+
+void auto_set_status(const std::string& text) {
+    A.status = text;
+    label(page(PageAuto), ID_AU_STATUS, text);
+}
+
+bool run_at_login_enabled() {
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_QUERY_VALUE, &k) != ERROR_SUCCESS) return false;
+    bool present = RegQueryValueExW(k, L"TomTomControlCenter", nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    RegCloseKey(k);
+    return present;
+}
+
+bool set_run_at_login(bool on) {
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS)
+        return false;
+    bool ok;
+    if (on) {
+        wchar_t exe[MAX_PATH * 2];
+        DWORD n = GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(sizeof exe / sizeof exe[0]));
+        std::wstring cmd = L"\"" + std::wstring(exe, n) + L"\" --tray";
+        ok = RegSetValueExW(k, L"TomTomControlCenter", 0, REG_SZ, reinterpret_cast<const BYTE*>(cmd.c_str()),
+                            static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    } else {
+        LONG r = RegDeleteValueW(k, L"TomTomControlCenter");
+        ok = r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND;
+    }
+    RegCloseKey(k);
+    return ok;
+}
+
+void tray_show(bool visible) {
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof nid;
+    nid.hWnd = S.hwnd;
+    nid.uID = 1;
+    if (visible && !A.in_tray) {
+        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        nid.uCallbackMessage = WM_TRAYICON;
+        nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        wcscpy(nid.szTip, L"TomTom Control Center");
+        A.in_tray = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+    } else if (!visible && A.in_tray) {
+        Shell_NotifyIconW(NIM_DELETE, &nid);
+        A.in_tray = false;
+    }
+}
+
+void window_to_tray() {
+    tray_show(true);
+    ShowWindow(S.hwnd, SW_HIDE);
+}
+
+void window_from_tray() {
+    ShowWindow(S.hwnd, SW_SHOW);
+    ShowWindow(S.hwnd, SW_RESTORE);
+    SetForegroundWindow(S.hwnd);
+    tray_show(false);
+}
+
+bool auto_checked(int id) { return Button_GetCheck(child(page(PageAuto), id)) == BST_CHECKED; }
+
+void auto_apply(int face, const std::string& why) {
+    if (A.busy || !is_valid_face_id(face)) return;
+    HWND dev = page(PageDevice);
+    std::string host, err;
+    if (!parse_device_host(get_text(child(dev, ID_DEV_HOST)), host, err)) {
+        auto_set_status("Automatic change skipped: " + err);
+        return;
+    }
+    DeviceOptions options;
+    options.host = host;
+    options.port = std::max(1024, std::min(65535, get_int(dev, ID_DEV_PORT, kDefaultDevicePort)));
+    A.busy = true;
+    A.last_apply_tick = GetTickCount64();
+    HWND hwnd = S.hwnd;
+    std::thread([hwnd, options, face, why] {
+        AutoReply* r = new AutoReply{face, why, device_set_face(options, face)};
+        if (!PostMessageW(hwnd, WM_AUTO_DONE, 0, reinterpret_cast<LPARAM>(r))) delete r;
+    }).detach();
+}
+
+void on_auto_done(AutoReply* raw) {
+    std::unique_ptr<AutoReply> r(raw);
+    A.busy = false;
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char when[16];
+    std::snprintf(when, sizeof when, "%02d:%02d", st.wHour, st.wMinute);
+    if (r->result.ok()) {
+        A.last_applied = r->face;
+        SendMessageW(child(page(PageDevice), ID_DEV_FACE), CB_SETCURSEL, static_cast<WPARAM>(r->face), 0);
+        auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " (applied)");
+    } else {
+        auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " FAILED: " + r->result.message);
+    }
+}
+
+// Rules that are on and have a valid time, as (minutes since midnight, face).
+std::vector<std::pair<int, int>> schedule_rules(bool report) {
+    std::vector<std::pair<int, int>> rules;
+    HWND pg = page(PageAuto);
+    for (int i = 0; i < 4; ++i) {
+        if (Button_GetCheck(child(pg, ID_AU_ON0 + i)) != BST_CHECKED) continue;
+        int minutes;
+        int face = static_cast<int>(SendMessageW(child(pg, ID_AU_FACE0 + i), CB_GETCURSEL, 0, 0));
+        if (!parse_hhmm(get_text(child(pg, ID_AU_TIME0 + i)), minutes) || !is_valid_face_id(face)) {
+            if (report) auto_set_status("Row " + std::to_string(i + 1) + ": enter the time as HH:MM (24-hour), for example 07:30.");
+            continue;
+        }
+        rules.emplace_back(minutes, face);
+    }
+    return rules;
+}
+
+void auto_tick() {
+    ULONGLONG now = GetTickCount64();
+    if (A.start_tick == 0) A.start_tick = now;
+    if (A.busy || now - A.last_apply_tick < 5000) return;  // never hammer the device
+    HWND pg = page(PageAuto);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    int minute_of_day = st.wHour * 60 + st.wMinute;
+    int day_key = static_cast<int>(st.wYear) * 400 + static_cast<int>(st.wMonth) * 32 + static_cast<int>(st.wDay);
+
+    // 1) once after launch
+    if (!A.launch_done && now - A.start_tick > 4000) {
+        A.launch_done = true;
+        if (auto_checked(ID_AU_LAUNCH_ON)) {
+            int f = static_cast<int>(SendMessageW(child(pg, ID_AU_LAUNCH_FACE), CB_GETCURSEL, 0, 0));
+            A.schedule_dirty = false;  // the schedule takes over at its next time
+            auto_apply(f, "on launch");
+            return;
+        }
+    }
+    if (!A.launch_done) return;
+
+    std::vector<std::pair<int, int>> rules = schedule_rules(false);
+    // 2) a rule's time has arrived
+    for (int i = 0; i < 4; ++i) {
+        if (Button_GetCheck(child(pg, ID_AU_ON0 + i)) != BST_CHECKED) continue;
+        int minutes;
+        if (!parse_hhmm(get_text(child(pg, ID_AU_TIME0 + i)), minutes) || minutes != minute_of_day) continue;
+        int key = day_key * 1440 + minutes;
+        if (A.last_fire_key[i] == key) continue;
+        A.last_fire_key[i] = key;
+        int face = static_cast<int>(SendMessageW(child(pg, ID_AU_FACE0 + i), CB_GETCURSEL, 0, 0));
+        A.schedule_dirty = false;
+        auto_apply(face, "schedule " + std::to_string(i + 1));
+        return;
+    }
+    // 3) schedule just switched on or changed: apply the rule that should be active right now
+    if (A.schedule_dirty && !rules.empty()) {
+        A.schedule_dirty = false;
+        int best = -1, best_min = -1, latest = -1, latest_min = -1;
+        for (size_t i = 0; i < rules.size(); ++i) {
+            if (rules[i].first <= minute_of_day && rules[i].first > best_min) { best = static_cast<int>(i); best_min = rules[i].first; }
+            if (rules[i].first > latest_min) { latest = static_cast<int>(i); latest_min = rules[i].first; }
+        }
+        int pick = best >= 0 ? best : latest;  // before the first rule of the day: the last rule from yesterday still applies
+        if (pick >= 0 && rules[static_cast<size_t>(pick)].second != A.last_applied) {
+            auto_apply(rules[static_cast<size_t>(pick)].second, "schedule (current period)");
+            return;
+        }
+    }
+    // 4) rotation
+    if (auto_checked(ID_AU_ROT_ON)) {
+        int mins = std::max(1, std::min(240, get_int(pg, ID_AU_ROT_MIN, 10)));
+        if (A.last_rotate_tick == 0) A.last_rotate_tick = now;
+        if (now - A.last_rotate_tick >= static_cast<ULONGLONG>(mins) * 60000ULL) {
+            A.last_rotate_tick = now;
+            int next = -1;
+            for (int step = 1; step <= kDeviceFaceCount && next < 0; ++step) {
+                int cand = (A.last_rotated + step + kDeviceFaceCount) % kDeviceFaceCount;
+                if (Button_GetCheck(child(pg, ID_AU_ROT_FACE0 + cand)) == BST_CHECKED) next = cand;
+            }
+            if (next >= 0) {
+                A.last_rotated = next;
+                auto_apply(next, "rotation");
+            }
+        }
+    }
+}
+
+void create_auto_page(HWND p) {
+    mk(p, L"BUTTON", L"Daily schedule - switch the face at set times", BS_GROUPBOX, 8, 4, 492, 176, -1);
+    for (int i = 0; i < 4; ++i) {
+        int y = 28 + i * 34;
+        mk_check(p, L"On", 18, y + 2, 44, ID_AU_ON0 + i);
+        mk_edit(p, 68, y, 62, ID_AU_TIME0 + i, i == 0 ? L"07:00" : i == 1 ? L"22:00" : L"");
+        mk_label(p, L"->", 140, y + 4, 22);
+        HWND c = mk_combo(p, 166, y, 200, ID_AU_FACE0 + i);
+        for (int f = 0; f < kDeviceFaceCount; ++f) add_item(c, std::to_string(f) + " - " + kDeviceFaces[f].name);
+        SendMessageW(c, CB_SETCURSEL, i == 0 ? 7 : i == 1 ? 2 : 0, 0);
+    }
+    mk_label(p, L"24-hour times (HH:MM). The Studio has to be running (it can sit in the tray).", 18, 160, 470, 18);
+
+    mk(p, L"BUTTON", L"Rotate faces", BS_GROUPBOX, 8, 186, 492, 150, -1);
+    mk_check(p, L"Rotate every", 18, 208, 100, ID_AU_ROT_ON);
+    mk_spin(p, 122, 204, 56, ID_AU_ROT_MIN, ID_AU_ROT_SPIN, 1, 240, 10);
+    mk_label(p, L"minutes through the faces ticked below", 186, 208, 300);
+    for (int f = 0; f < kDeviceFaceCount; ++f)
+        mk_check(p, W(std::to_string(f) + " - " + kDeviceFaces[f].name).c_str(), 18 + (f % 3) * 160, 238 + (f / 3) * 28, 156, ID_AU_ROT_FACE0 + f);
+
+    mk(p, L"BUTTON", L"When this app starts", BS_GROUPBOX, 8, 342, 492, 62, -1);
+    mk_check(p, L"Set the face to", 18, 366, 116, ID_AU_LAUNCH_ON);
+    HWND lf = mk_combo(p, 138, 362, 228, ID_AU_LAUNCH_FACE);
+    for (int f = 0; f < kDeviceFaceCount; ++f) add_item(lf, std::to_string(f) + " - " + kDeviceFaces[f].name);
+    SendMessageW(lf, CB_SETCURSEL, 7, 0);
+
+    mk(p, L"BUTTON", L"Run quietly", BS_GROUPBOX, 8, 410, 492, 92, -1);
+    mk_check(p, L"Keep running in the tray when I close the window", 18, 432, 460, ID_AU_TRAY);
+    mk_check(p, L"Start with Windows (hidden in the tray)", 18, 458, 460, ID_AU_RUN);
+    Button_SetCheck(child(p, ID_AU_RUN), run_at_login_enabled() ? BST_CHECKED : BST_UNCHECKED);
+    mk_label(p, L"Webhook, Spotify announcements and the schedule only work while the app is running.", 18, 482, 470, 18);
+    mk_label(p, L"Automatic changes use the same validated face command as the Device tab and are spaced at least 5 s apart.", 8, 510, 492, 34);
+    mk_label(p, L"", 8, 548, 492, 52, ID_AU_STATUS);
+}
+
 void create_ui(HWND h) {
     S.hwnd = h;
     HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), view = CreatePopupMenu(), help = CreatePopupMenu();
@@ -1975,6 +2270,7 @@ void create_ui(HWND h) {
     create_display_page(S.pages[PageDisplay]);
     create_live_page(S.pages[PageLive]);
     create_pictures_page(S.pages[PagePictures]);
+    create_auto_page(S.pages[PageAuto]);
     load_settings();
     S.project = default_project();
     refresh_all_ui();
@@ -2116,6 +2412,16 @@ void handle_command(int id, int code, HWND src) {
         case ID_DEV_HOST:
             if (code == EN_CHANGE) remember_notify_host();
             break;
+        case ID_AU_TRAY: save_settings(); break;
+        case ID_AU_RUN:
+            if (!set_run_at_login(Button_GetCheck(src) == BST_CHECKED)) {
+                Button_SetCheck(src, run_at_login_enabled() ? BST_CHECKED : BST_UNCHECKED);
+                auto_set_status("Could not change the Windows startup entry.");
+            } else {
+                auto_set_status(Button_GetCheck(src) == BST_CHECKED ? "The app will start hidden in the tray when you sign in to Windows."
+                                                                    : "The app will no longer start with Windows.");
+            }
+            break;
         case ID_PIC_SHOT_OPEN: shot_open_dialog(); break;
         case ID_PIC_SHOT_SAVE: shot_save_png(); break;
         case ID_PIC_SHOT_PAGE:
@@ -2165,7 +2471,11 @@ void handle_command(int id, int code, HWND src) {
         case IDM_OPEN: do_open(); break;
         case IDM_SAVE: do_save(false); break;
         case IDM_SAVEAS: do_save(true); break;
-        case IDM_EXIT: SendMessageW(S.hwnd, WM_CLOSE, 0, 0); break;
+        case IDM_EXIT:
+            A.exiting = true;
+            SendMessageW(S.hwnd, WM_CLOSE, 0, 0);
+            if (IsWindow(S.hwnd)) A.exiting = false;
+            break;
         case IDM_DESIGNER:
             set_designer_mode(!S.designer, true);
             save_settings();
@@ -2177,24 +2487,44 @@ void handle_command(int id, int code, HWND src) {
                     "Device control: fixed-command TCP service on port 18743 over a direct USB link only - "
                     "plain text, unauthenticated.");
             break;
+        case IDM_TRAY_OPEN: window_from_tray(); break;
+        case IDM_TRAY_EXIT:
+            A.exiting = true;
+            window_from_tray();
+            SendMessageW(S.hwnd, WM_CLOSE, 0, 0);
+            if (IsWindow(S.hwnd)) A.exiting = false;  // the user cancelled the "save changes" prompt
+            break;
         default:
+            if (id >= ID_AU_ON0 && id < ID_AU_ON0 + 4) { A.schedule_dirty = true; save_settings(); }
+            else if (id >= ID_AU_TIME0 && id < ID_AU_TIME0 + 4) {
+                if (code == EN_CHANGE) { A.schedule_dirty = true; schedule_rules(true); }
+            }
+            else if (id >= ID_AU_FACE0 && id < ID_AU_FACE0 + 4) { if (code == CBN_SELCHANGE) { A.schedule_dirty = true; save_settings(); } }
+            else if (id >= ID_AU_ROT_FACE0 && id < ID_AU_ROT_FACE0 + 9) { A.last_rotate_tick = 0; save_settings(); }
+            else if (id == ID_AU_ROT_ON || id == ID_AU_LAUNCH_ON) save_settings();
+            else
             if (id >= ID_SWATCH0 && id < ID_SWATCH0 + 8) set_active_color(U(kSwatches[id - ID_SWATCH0]));
             else if (id >= ID_DATA0 && id < ID_DATA0 + 8) { sync_data_requirements(); mark_dirty(); }
     }
 }
 
 LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static const UINT kTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    if (msg == kTaskbarCreated) {  // Explorer restarted: the tray icon was lost
+        if (A.in_tray) { A.in_tray = false; tray_show(true); }
+        return 0;
+    }
     switch (msg) {
         case WM_CREATE: create_ui(hwnd); return 0;
         case WM_SIZE: layout(); return 0;
         case WM_GETMINMAXINFO: {
             MINMAXINFO* mm = reinterpret_cast<MINMAXINFO*>(lp);
-            mm->ptMinTrackSize.x = S.designer ? D(1040) : D(500);
+            mm->ptMinTrackSize.x = S.designer ? D(1040) : D(560);
             mm->ptMinTrackSize.y = D(690);
             return 0;
         }
         case WM_TIMER: {
-            if (wp == 2) { live_tick(); return 0; }
+            if (wp == 2) { live_tick(); auto_tick(); return 0; }
             ++S.tick;
             if (S.live_clock) {
                 SYSTEMTIME st;
@@ -2248,9 +2578,29 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_DEVICE_DONE: on_device_done(reinterpret_cast<DeviceReply*>(lp)); return 0;
         case WM_LYRICS_DONE: on_lyrics_done(reinterpret_cast<LyricsReply*>(lp)); return 0;
+        case WM_AUTO_DONE: on_auto_done(reinterpret_cast<AutoReply*>(lp)); return 0;
+        case WM_TRAYICON:
+            if (LOWORD(lp) == WM_LBUTTONDBLCLK || LOWORD(lp) == WM_LBUTTONUP) window_from_tray();
+            else if (LOWORD(lp) == WM_RBUTTONUP) {
+                HMENU m = CreatePopupMenu();
+                AppendMenuW(m, MF_STRING, IDM_TRAY_OPEN, L"Open TomTom Control Center");
+                AppendMenuW(m, MF_STRING, IDM_TRAY_EXIT, L"Exit");
+                POINT pt;
+                GetCursorPos(&pt);
+                SetForegroundWindow(hwnd);
+                TrackPopupMenu(m, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(m);
+            }
+            return 0;
         case WM_CLOSE:
+            if (!A.exiting && auto_checked(ID_AU_TRAY)) {  // close button hides to the tray instead of quitting
+                save_settings();
+                window_to_tray();
+                return 0;
+            }
             if (confirm_discard()) {
                 save_settings();
+                tray_show(false);
                 DestroyWindow(hwnd);
             }
             return 0;
@@ -2322,9 +2672,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int show) {
                     if (S.tab_pages[t] == PagePictures) { TabCtrl_SetCurSel(S.tab, static_cast<int>(t)); show_page(PagePictures); }
                 shot_load(argv[i + 1]);
             }
+        bool hidden_start = false;
+        for (int i = 1; argv && i < argc; ++i)
+            if (std::wstring(argv[i]) == L"--tray") hidden_start = true;
         if (argv) LocalFree(argv);
+        if (hidden_start) {
+            Button_SetCheck(child(page(PageAuto), ID_AU_TRAY), BST_CHECKED);  // a startup launch always lives in the tray
+            window_to_tray();
+            show = SW_HIDE;
+        }
     }
-    ShowWindow(hwnd, show);
+    if (show != SW_HIDE) ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
 
     ACCEL accel[] = {{FCONTROL | FVIRTKEY, 'Z', IDM_UNDO}, {FCONTROL | FVIRTKEY, 'Y', IDM_REDO},

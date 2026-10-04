@@ -102,7 +102,7 @@ if(WIN32 AND FACESTUDIO_BUILD_APP)
   target_include_directories(TomTomFaceStudio PRIVATE
     ../watchface-research/project/src/opentom_skel/bin)
   target_link_libraries(TomTomFaceStudio PRIVATE facestudio_core
-    user32 gdi32 comctl32 comdlg32 shell32 ole32 windowscodecs uuid winhttp)
+    user32 gdi32 comctl32 comdlg32 shell32 ole32 windowscodecs uuid winhttp advapi32)
   target_compile_definitions(TomTomFaceStudio PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
   facestudio_shrink(TomTomFaceStudio)
   if(MSVC)
