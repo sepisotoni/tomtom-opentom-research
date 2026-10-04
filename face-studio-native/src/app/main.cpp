@@ -92,8 +92,8 @@ enum Ids {
     ID_DATA0 = 350,  // 8 checkboxes
     ID_META_NAME = 400, ID_META_AUTHOR, ID_META_VER, ID_GAL_NAME, ID_FMT0, ID_FMT1, ID_FMT_DEFAULT, ID_VALIDATE,
     ID_EXPORT, ID_GALLERY, ID_INSPECT_FACE, ID_INSPECT_GAL, ID_LOG,
-    ID_DEV_HOST = 500, ID_DEV_FACE, ID_DEV_APPLY, ID_DEV_READ, ID_DEV_PING, ID_DEV_STATUS, ID_DEV_WARN,
-    IDM_OPEN = 600, IDM_SAVE, IDM_SAVEAS, IDM_EXIT, IDM_UNDO, IDM_REDO, IDM_ABOUT,
+    ID_DEV_HOST = 500, ID_DEV_PORT, ID_DEV_PORT_SPIN, ID_DEV_FACE, ID_DEV_APPLY, ID_DEV_READ, ID_DEV_PING, ID_DEV_STATUS, ID_DEV_WARN,
+    IDM_OPEN = 600, IDM_SAVE, IDM_SAVEAS, IDM_EXIT, IDM_UNDO, IDM_REDO, IDM_ABOUT, IDM_DESIGNER,
     ID_STATUSBAR = 700,
     ID_MIR_SRC = 800, ID_MIR_REFRESH, ID_MIR_FIT, ID_MIR_START, ID_MIR_STOP, ID_MIR_STATUS, ID_MIR_WARN,
     ID_NF_TEXT = 820, ID_NF_TTL, ID_NF_TTL_SPIN, ID_NF_SEND, ID_NF_STATUS,
@@ -145,6 +145,8 @@ struct AppState {
     SimTime sim_time;
     int tick = 0;
 
+    bool designer = false;   // false: control-center layout (default); true: face designer with canvas
+    std::vector<int> tab_pages;  // page shown by each visible tab
     bool dev_busy = false;
     int dev_state = 0;  // 0 neutral, 1 ok, 2 error
     COLORREF custom_colors[16] = {};
@@ -240,7 +242,7 @@ Json* elements() {
 }
 
 void set_title() {
-    std::wstring t = L"TomTom Face Studio - [TomTom ONE v6 / Nano-X 320x240]";
+    std::wstring t = L"TomTom Control Center (Face Studio) - TomTom ONE v6";
     if (!S.project_path.empty()) {
         size_t slash = S.project_path.find_last_of(L"\\/");
         t += L" - " + S.project_path.substr(slash == std::wstring::npos ? 0 : slash + 1);
@@ -1029,7 +1031,16 @@ void start_device(int kind) {  // 0 ping, 1 status, 2 set face
     }
     DeviceOptions options;
     options.host = host;
-    g_device_note = is_usb_link_address(host) ? "" : "\nNote: " + host + " is not on the TomTom's USB subnet (192.168.101.0/24).";
+    int port = get_int(pg, ID_DEV_PORT, kDefaultDevicePort);
+    if (port < 1024 || port > 65535) {
+        set_device_status(2, "Choose a port between 1024 and 65535 (the TomTom uses 18743).");
+        return;
+    }
+    options.port = port;
+    if (is_usb_link_address(host)) g_device_note = "";
+    else if (host.rfind("127.", 0) == 0)
+        g_device_note = "\nNote: connecting through a local tunnel (port " + std::to_string(port) + "). Only face control uses it; notifications and screen mirroring still need a direct route.";
+    else g_device_note = "\nNote: " + host + " is not on the TomTom's USB subnet (192.168.101.0/24).";
     set_device_busy(true);
     set_device_status(0, std::string(kind == 2 ? "Sending the face change" : kind == 1 ? "Reading the current face" : "Contacting the TomTom") + "...");
     HWND hwnd = S.hwnd;
@@ -1053,6 +1064,20 @@ void show_page(int index) {
     for (int i = 0; i < PageCount; ++i) ShowWindow(S.pages[i], i == index ? SW_SHOW : SW_HIDE);
 }
 
+// Control-center mode hides the drawing tools and the canvas and gives the tabs the whole window.
+void apply_mode_visibility() {
+    struct Ctx { bool show; } ctx{S.designer};
+    EnumChildWindows(S.hwnd, [](HWND w, LPARAM lp) -> BOOL {
+        if (GetParent(w) != S.hwnd) return TRUE;
+        if (w == S.tab || w == S.status || w == S.canvas_wnd) return TRUE;
+        for (int i = 0; i < PageCount; ++i)
+            if (w == S.pages[i]) return TRUE;
+        ShowWindow(w, reinterpret_cast<Ctx*>(lp)->show ? SW_SHOW : SW_HIDE);  // left-panel controls
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+    ShowWindow(S.canvas_wnd, S.designer ? SW_SHOW : SW_HIDE);
+}
+
 void layout() {
     if (!S.tab) return;
     RECT rc;
@@ -1061,9 +1086,18 @@ void layout() {
     RECT sb;
     GetWindowRect(S.status, &sb);
     int bottom = rc.bottom - (sb.bottom - sb.top);
-    int right_w = D(430), left_w = D(240), pad = D(8);
-    MoveWindow(S.canvas_wnd, left_w, pad, std::max(50, static_cast<int>(rc.right) - left_w - right_w - pad), bottom - 2 * pad, TRUE);
-    int tab_x = rc.right - right_w, tab_w = right_w - pad, tab_h = bottom - 2 * pad;
+    int pad = D(8);
+    int tab_x, tab_w;
+    if (S.designer) {
+        int right_w = D(430), left_w = D(240);
+        MoveWindow(S.canvas_wnd, left_w, pad, std::max(50, static_cast<int>(rc.right) - left_w - right_w - pad), bottom - 2 * pad, TRUE);
+        tab_x = rc.right - right_w;
+        tab_w = right_w - pad;
+    } else {
+        tab_x = pad;
+        tab_w = std::max<int>(D(300), static_cast<int>(rc.right) - 2 * pad);
+    }
+    int tab_h = bottom - 2 * pad;
     MoveWindow(S.tab, tab_x, pad, tab_w, tab_h, TRUE);
     RECT disp{0, 0, tab_w, tab_h};
     TabCtrl_AdjustRect(S.tab, FALSE, &disp);
@@ -1075,6 +1109,37 @@ void layout() {
     ScreenToClient(S.pages[PageExport], &tl);
     MoveWindow(log, tl.x, tl.y, disp.right - disp.left - D(16), std::max<int>(D(60), static_cast<int>(disp.bottom - disp.top) - static_cast<int>(tl.y) - D(8)), TRUE);
     update_scrollbars();
+}
+
+void rebuild_tabs() {
+    static const wchar_t* const names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live"};
+    TabCtrl_DeleteAllItems(S.tab);
+    S.tab_pages.clear();
+    if (S.designer) S.tab_pages = {PageElements, PageSim, PageData, PageExport, PageDevice, PageDisplay, PageLive};
+    else S.tab_pages = {PageDevice, PageDisplay, PageLive};
+    for (size_t i = 0; i < S.tab_pages.size(); ++i) {
+        TCITEMW ti{};
+        ti.mask = TCIF_TEXT;
+        ti.pszText = const_cast<wchar_t*>(names[S.tab_pages[i]]);
+        TabCtrl_InsertItem(S.tab, static_cast<int>(i), &ti);
+    }
+    TabCtrl_SetCurSel(S.tab, 0);
+    show_page(S.tab_pages.empty() ? 0 : S.tab_pages[0]);
+}
+
+void set_designer_mode(bool on, bool resize_window) {
+    S.designer = on;
+    HMENU view = GetSubMenu(GetMenu(S.hwnd), 2);
+    if (view) CheckMenuItem(view, IDM_DESIGNER, MF_BYCOMMAND | (on ? MF_CHECKED : MF_UNCHECKED));
+    apply_mode_visibility();
+    rebuild_tabs();
+    if (resize_window && !IsZoomed(S.hwnd)) {
+        RECT r;
+        GetWindowRect(S.hwnd, &r);
+        SetWindowPos(S.hwnd, nullptr, r.left, r.top, on ? D(1180) : D(560), on ? D(770) : D(800), SWP_NOZORDER | SWP_NOMOVE);
+    }
+    layout();
+    redraw_canvas();
 }
 
 void create_left_panel(HWND h) {
@@ -1200,7 +1265,9 @@ void create_export_page(HWND p) {
 void create_device_page(HWND p) {
     mk(p, L"BUTTON", L"Connected TomTom Face", BS_GROUPBOX, 8, 4, 364, 282, -1);
     mk_label(p, L"TomTom USB IP:", 18, 30, 100);
-    mk_edit(p, 122, 26, 236, ID_DEV_HOST, W(kDefaultDeviceHost).c_str());
+    mk_edit(p, 122, 26, 138, ID_DEV_HOST, W(kDefaultDeviceHost).c_str());
+    mk_label(p, L"Port:", 266, 30, 32);
+    mk_spin(p, 300, 26, 58, ID_DEV_PORT, ID_DEV_PORT_SPIN, 1024, 65535, kDefaultDevicePort);
     mk_label(p, L"Face:", 18, 62, 100);
     HWND face = mk_combo(p, 122, 58, 236, ID_DEV_FACE);
     for (int i = 0; i < kDeviceFaceCount; ++i) add_item(face, std::to_string(i) + " - " + kDeviceFaces[i].name);
@@ -1270,6 +1337,7 @@ void save_settings() {
     WritePrivateProfileStringW(L"webhook", L"token", W(F.token).c_str(), f.c_str());
     WritePrivateProfileStringW(L"webhook", L"port", std::to_wstring(get_int(pg, ID_WH_PORT, tt::kDefaultWebhookPort)).c_str(), f.c_str());
     WritePrivateProfileStringW(L"webhook", L"lan", Button_GetCheck(child(pg, ID_WH_LAN)) == BST_CHECKED ? L"1" : L"0", f.c_str());
+    WritePrivateProfileStringW(L"ui", L"designer", S.designer ? L"1" : L"0", f.c_str());
 }
 
 void load_settings() {
@@ -1283,6 +1351,7 @@ void load_settings() {
     set_int(pg, ID_WH_PORT, static_cast<int>(GetPrivateProfileIntW(L"webhook", L"port", tt::kDefaultWebhookPort, f.c_str())));
     Button_SetCheck(child(pg, ID_WH_LAN), GetPrivateProfileIntW(L"webhook", L"lan", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
     set_text(child(pg, ID_WH_TOKEN), F.token);
+    S.designer = GetPrivateProfileIntW(L"ui", L"designer", 0, f.c_str()) != 0;
 }
 
 void remember_notify_host() {
@@ -1680,7 +1749,7 @@ void create_live_page(HWND p) {
 
 void create_ui(HWND h) {
     S.hwnd = h;
-    HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), help = CreatePopupMenu();
+    HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), view = CreatePopupMenu(), help = CreatePopupMenu();
     AppendMenuW(file, MF_STRING, IDM_OPEN, L"&Open Project...\tCtrl+O");
     AppendMenuW(file, MF_STRING, IDM_SAVE, L"&Save Project\tCtrl+S");
     AppendMenuW(file, MF_STRING, IDM_SAVEAS, L"Save Project &As...");
@@ -1691,12 +1760,14 @@ void create_ui(HWND h) {
     AppendMenuW(help, MF_STRING, IDM_ABOUT, L"&About");
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), L"&File");
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(edit), L"&Edit");
+    AppendMenuW(view, MF_STRING, IDM_DESIGNER, L"&Face designer (canvas editor)");
+    AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(view), L"&View");
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(help), L"&Help");
     SetMenu(h, bar);
 
     S.status = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, h, reinterpret_cast<HMENU>(ID_STATUSBAR), S.inst, nullptr);
     SendMessageW(S.status, WM_SETFONT, reinterpret_cast<WPARAM>(S.font), TRUE);
-    set_status_text("Ready - draw on the canvas, add elements, then export a .ttface package.");
+    set_status_text("Ready.");
 
     create_left_panel(h);
     S.canvas_wnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"TTCanvas", L"", WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL, 0, 0, 10, 10, h,
@@ -1704,14 +1775,8 @@ void create_ui(HWND h) {
     S.tab = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_MULTILINE, 0, 0, 10, 10, h,
                             reinterpret_cast<HMENU>(ID_TAB), S.inst, nullptr);
     SendMessageW(S.tab, WM_SETFONT, reinterpret_cast<WPARAM>(S.font), TRUE);
-    const wchar_t* names[PageCount] = {L"Elements", L"Sim", L"Data", L"Export", L"Device", L"Display", L"Live"};
-    for (int i = 0; i < PageCount; ++i) {
-        TCITEMW ti{};
-        ti.mask = TCIF_TEXT;
-        ti.pszText = const_cast<wchar_t*>(names[i]);
-        TabCtrl_InsertItem(S.tab, i, &ti);
+    for (int i = 0; i < PageCount; ++i)
         S.pages[i] = CreateWindowExW(WS_EX_CONTROLPARENT, L"TTPage", L"", WS_CHILD, 0, 0, 10, 10, h, nullptr, S.inst, nullptr);
-    }
     create_elements_page(S.pages[PageElements]);
     create_sim_page(S.pages[PageSim]);
     create_data_page(S.pages[PageData]);
@@ -1720,10 +1785,9 @@ void create_ui(HWND h) {
     create_display_page(S.pages[PageDisplay]);
     create_live_page(S.pages[PageLive]);
     load_settings();
-    show_page(0);
     S.project = default_project();
     refresh_all_ui();
-    layout();
+    set_designer_mode(S.designer, true);
     update_scrollbars();
     SetTimer(h, 1, 1000, nullptr);
     SetTimer(h, 2, 300, nullptr);
@@ -1903,6 +1967,10 @@ void handle_command(int id, int code, HWND src) {
         case IDM_SAVE: do_save(false); break;
         case IDM_SAVEAS: do_save(true); break;
         case IDM_EXIT: SendMessageW(S.hwnd, WM_CLOSE, 0, 0); break;
+        case IDM_DESIGNER:
+            set_designer_mode(!S.designer, true);
+            save_settings();
+            break;
         case IDM_ABOUT:
             message("About TomTom Face Studio",
                     "TomTom Face Studio (native Win32 build)\nTarget: TomTom ONE v6 (Model 19), 320x240, Nano-X\n\n"
@@ -1922,7 +1990,7 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SIZE: layout(); return 0;
         case WM_GETMINMAXINFO: {
             MINMAXINFO* mm = reinterpret_cast<MINMAXINFO*>(lp);
-            mm->ptMinTrackSize.x = D(1040);
+            mm->ptMinTrackSize.x = S.designer ? D(1040) : D(500);
             mm->ptMinTrackSize.y = D(690);
             return 0;
         }
@@ -1941,7 +2009,10 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_COMMAND: handle_command(LOWORD(wp), HIWORD(wp), reinterpret_cast<HWND>(lp)); return 0;
         case WM_NOTIFY: {
             NMHDR* nm = reinterpret_cast<NMHDR*>(lp);
-            if (nm->idFrom == ID_TAB && nm->code == TCN_SELCHANGE) show_page(TabCtrl_GetCurSel(S.tab));
+            if (nm->idFrom == ID_TAB && nm->code == TCN_SELCHANGE) {
+                int sel = TabCtrl_GetCurSel(S.tab);
+                if (sel >= 0 && sel < static_cast<int>(S.tab_pages.size())) show_page(S.tab_pages[static_cast<size_t>(sel)]);
+            }
             return 0;
         }
         case WM_HSCROLL:
