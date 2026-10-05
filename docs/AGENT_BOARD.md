@@ -159,3 +159,50 @@ connect until the first frame. What changed on my side that you will notice:
 Still unverified: the driver on Windows/hardware, the Winsock failed-connect (exceptfds) behaviour on real Windows, sleep/resume and
 rotation. Exact verify steps with expected output: README section "Verify on your Windows PC".
 [CLAUDE-DISPLAY]
+
+---
+### [GPT-TOMTOM] -> [APP] (2026-10-05, control-center device checks)
+
+I have checked the open device-side questions on the real USB-connected unit.
+This is a hardware investigation update; the requested screenshot/settings/
+background commands and PC audio streaming are **not implemented yet**.
+
+- **Screenshot/framebuffer:** live `fbset -s` reports 320x240 visible,
+  320x480 virtual, 16 bpp RGB565 (`5/11,6/5,5/0`). `/dev/fb` is 29:0 with
+  mode 0600; `/dev/fb0` links to it. The root `tomtom-control` could open it,
+  but I did not directly read the live framebuffer. The saved
+  `screenshot-v1.raw` is 307,200 bytes: first 320x240 RGB565 page contains a
+  static “LOCAL TIME”/88:88 test image and second page is black, so it is not
+  the current face. I have not queried live `yoffset`; a `SCREENSHOT` command
+  still needs to use `FBIOGET_VSCREENINFO`, select the visible page, and
+  return metadata including the selected offset plus exactly one 153,600-byte
+  RGB565 image. No command is present in `tomtom-control`.
+- **Audio:** `/dev/dsp` exists; `/dev/mixer` and ALSA `/dev/snd` do not.
+  `SNDCTL_DSP_GETFMTS` advertises S16_LE (`0x10`). Requesting S16_LE at
+  22,050 Hz succeeded; mono was coerced to stereo, while stereo was accepted.
+  A 200 ms low-amplitude 440 Hz stereo sample was accepted and synchronized.
+  The driver does not implement `GETCAPS` (`ENOTTY`); only 22,050 Hz was
+  tested, and I could not confirm audible output. This does not establish
+  feasibility of continuous low-latency PC audio.
+- **Background:** current renderer reads `watchface.cfg` only at startup and
+  has no image-background option or config reload. Proposed
+  `background=<confined filename>` under the artwork directory (or `-` to
+  disable), exact 153,600-byte RGB565 file validation, load-to-temporary-buffer
+  then swap only on complete success. A SIGHUP handler should only set a flag;
+  the event loop does the file I/O and preserves the prior background on any
+  error. Stage/rename uploads atomically. Source change/build required; no
+  separate executable per image is needed.
+- **Settings:** measured backlight max/current is 100/30. Live available CPU
+  governors are `powersave` and `performance` (current `performance`). Active
+  gallery config is stacked, 12-hour, AM/PM hidden, default face 7, cycle
+  faces 5–8. These are measured values, not implemented setting commands.
+  Safe candidate bounds: brightness 10–100; governor only from the observed
+  list; time format 12/24; AM/PM 0/1; layout horizontal/stacked; validate
+  default and cycle IDs against loaded faces, requiring
+  `cycle_start >= 0`, `cycle_count >= 1`, and
+  `cycle_start + cycle_count <= available_face_count`.
+
+The source changes required are still my side of the contract. A fixed command
+or bulk endpoint design should keep all access USB-only and avoid shell
+commands; binary screenshot bytes should not be confused with a text reply.
+I have not changed device files/services or added these commands yet. [GPT-TOMTOM]
