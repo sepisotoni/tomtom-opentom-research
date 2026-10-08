@@ -1372,7 +1372,7 @@ void save_settings() {
         for (int i = 0; i < kDeviceFaceCount; ++i)
             if (Button_GetCheck(child(au, ID_AU_ROT_FACE0 + i)) == BST_CHECKED) mask |= 1u << i;
         WritePrivateProfileStringW(L"rotate", L"on", Button_GetCheck(child(au, ID_AU_ROT_ON)) == BST_CHECKED ? L"1" : L"0", f.c_str());
-        WritePrivateProfileStringW(L"rotate", L"minutes", std::to_wstring(get_int(au, ID_AU_ROT_MIN, 10)).c_str(), f.c_str());
+        WritePrivateProfileStringW(L"rotate", L"minutes", std::to_wstring(get_int(au, ID_AU_ROT_MIN, 30)).c_str(), f.c_str());
         WritePrivateProfileStringW(L"rotate", L"mask", std::to_wstring(mask).c_str(), f.c_str());
         WritePrivateProfileStringW(L"launch", L"on", Button_GetCheck(child(au, ID_AU_LAUNCH_ON)) == BST_CHECKED ? L"1" : L"0", f.c_str());
         WritePrivateProfileStringW(L"launch", L"face", std::to_wstring(static_cast<int>(SendMessageW(child(au, ID_AU_LAUNCH_FACE), CB_GETCURSEL, 0, 0))).c_str(), f.c_str());
@@ -1425,8 +1425,8 @@ void load_settings() {
         unsigned mask = static_cast<unsigned>(GetPrivateProfileIntW(L"rotate", L"mask", 0, f.c_str()));
         for (int i = 0; i < kDeviceFaceCount; ++i) Button_SetCheck(child(au, ID_AU_ROT_FACE0 + i), (mask >> i) & 1u ? BST_CHECKED : BST_UNCHECKED);
         Button_SetCheck(child(au, ID_AU_ROT_ON), GetPrivateProfileIntW(L"rotate", L"on", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
-        int mins = static_cast<int>(GetPrivateProfileIntW(L"rotate", L"minutes", 10, f.c_str()));
-        set_int(au, ID_AU_ROT_MIN, std::max(1, std::min(240, mins)));
+        int mins = static_cast<int>(GetPrivateProfileIntW(L"rotate", L"minutes", 30, f.c_str()));
+        set_int(au, ID_AU_ROT_MIN, std::max(5, std::min(240, mins)));
         Button_SetCheck(child(au, ID_AU_LAUNCH_ON), GetPrivateProfileIntW(L"launch", L"on", 0, f.c_str()) ? BST_CHECKED : BST_UNCHECKED);
         int lface = static_cast<int>(GetPrivateProfileIntW(L"launch", L"face", 7, f.c_str()));
         if (is_valid_face_id(lface)) SendMessageW(child(au, ID_AU_LAUNCH_FACE), CB_SETCURSEL, static_cast<WPARAM>(lface), 0);
@@ -2000,6 +2000,7 @@ struct AutoReply {
     int face;
     std::string why;
     DeviceResult result;
+    bool skipped = false;  // the TomTom already showed this face, so nothing was written to its SD card
 };
 
 struct Automation {
@@ -2007,6 +2008,7 @@ struct Automation {
     int last_fire_key[4] = {-1, -1, -1, -1};
     int last_applied = -1;
     int last_rotated = -1;
+    int sd_writes = 0;  // face changes actually sent this session (each one is an SD-card write on the TomTom)
     bool launch_done = false, schedule_dirty = true, busy = false;
     bool exiting = false, in_tray = false;
     std::string status;
@@ -2090,7 +2092,11 @@ void auto_apply(int face, const std::string& why) {
     A.last_apply_tick = GetTickCount64();
     HWND hwnd = S.hwnd;
     std::thread([hwnd, options, face, why] {
-        AutoReply* r = new AutoReply{face, why, device_set_face(options, face)};
+        // Every SET_FACE is saved to the TomTom's SD card (confirmed in the device source), so read the current face
+        // first (a read, no write) and skip the change when it is already showing.
+        AutoReply* r = new AutoReply{face, why, device_status(options), false};
+        if (r->result.ok() && r->result.face_id == face) r->skipped = true;
+        else r->result = device_set_face(options, face);
         if (!PostMessageW(hwnd, WM_AUTO_DONE, 0, reinterpret_cast<LPARAM>(r))) delete r;
     }).detach();
 }
@@ -2105,7 +2111,13 @@ void on_auto_done(AutoReply* raw) {
     if (r->result.ok()) {
         A.last_applied = r->face;
         SendMessageW(child(page(PageDevice), ID_DEV_FACE), CB_SETCURSEL, static_cast<WPARAM>(r->face), 0);
-        auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " (applied)");
+        if (r->skipped) {
+            auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " already showing, nothing written to the SD card");
+        } else {
+            ++A.sd_writes;
+            auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " (applied; " + std::to_string(A.sd_writes) +
+                            " SD write" + (A.sd_writes == 1 ? "" : "s") + " this session)");
+        }
     } else {
         auto_set_status(std::string(when) + "  " + r->why + " -> " + face_name(r->face) + " FAILED: " + r->result.message);
     }
@@ -2131,7 +2143,7 @@ std::vector<std::pair<int, int>> schedule_rules(bool report) {
 void auto_tick() {
     ULONGLONG now = GetTickCount64();
     if (A.start_tick == 0) A.start_tick = now;
-    if (A.busy || now - A.last_apply_tick < 5000) return;  // never hammer the device
+    if (A.busy || now - A.last_apply_tick < 20000) return;  // never hammer the device (each change is an SD write)
     HWND pg = page(PageAuto);
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -2180,7 +2192,7 @@ void auto_tick() {
     }
     // 4) rotation
     if (auto_checked(ID_AU_ROT_ON)) {
-        int mins = std::max(1, std::min(240, get_int(pg, ID_AU_ROT_MIN, 10)));
+        int mins = std::max(5, std::min(240, get_int(pg, ID_AU_ROT_MIN, 30)));
         if (A.last_rotate_tick == 0) A.last_rotate_tick = now;
         if (now - A.last_rotate_tick >= static_cast<ULONGLONG>(mins) * 60000ULL) {
             A.last_rotate_tick = now;
@@ -2212,7 +2224,7 @@ void create_auto_page(HWND p) {
 
     mk(p, L"BUTTON", L"Rotate faces", BS_GROUPBOX, 8, 186, 492, 150, -1);
     mk_check(p, L"Rotate every", 18, 208, 100, ID_AU_ROT_ON);
-    mk_spin(p, 122, 204, 56, ID_AU_ROT_MIN, ID_AU_ROT_SPIN, 1, 240, 10);
+    mk_spin(p, 122, 204, 56, ID_AU_ROT_MIN, ID_AU_ROT_SPIN, 5, 240, 30);
     mk_label(p, L"minutes through the faces ticked below", 186, 208, 300);
     for (int f = 0; f < kDeviceFaceCount; ++f)
         mk_check(p, W(std::to_string(f) + " - " + kDeviceFaces[f].name).c_str(), 18 + (f % 3) * 160, 238 + (f / 3) * 28, 156, ID_AU_ROT_FACE0 + f);
@@ -2228,7 +2240,7 @@ void create_auto_page(HWND p) {
     mk_check(p, L"Start with Windows (hidden in the tray)", 18, 458, 460, ID_AU_RUN);
     Button_SetCheck(child(p, ID_AU_RUN), run_at_login_enabled() ? BST_CHECKED : BST_UNCHECKED);
     mk_label(p, L"Webhook, Spotify announcements and the schedule only work while the app is running.", 18, 482, 470, 18);
-    mk_label(p, L"Automatic changes use the same validated face command as the Device tab and are spaced at least 5 s apart.", 8, 510, 492, 34);
+    mk_label(p, L"Every face change is saved to the TomTom's SD card, so rotation is limited to 5 minutes or longer, changes are at least 20 s apart, and a face the TomTom already shows is not sent again.", 8, 510, 492, 34);
     mk_label(p, L"", 8, 548, 492, 52, ID_AU_STATUS);
 }
 

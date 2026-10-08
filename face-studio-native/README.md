@@ -101,7 +101,7 @@ The app opens as a TomTom control center: **Device** (switch faces, status, test
 **Live** (notifications, webhook, Spotify) and **Pictures** (open a raw TomTom screenshot and save it as PNG; prepare any
 picture as a 320x240 RGB565 background). The face designer (canvas, elements, simulator, `.ttface` / `.ttgallery`) is under
 **View > Face designer**. The Device tab has a port field so face control also works through an SSH tunnel
-(`ssh -N -L 28743:192.168.101.115:18743 user@linux-box`, then host `127.0.0.1`, port `28743`). Automatic changes use the same validated `SET_FACE` as the Device tab, spaced at least 5 s apart, and only work while the app is running
+(`ssh -N -L 28743:192.168.101.115:18743 user@linux-box`, then host `127.0.0.1`, port `28743`). Automatic changes use the same validated `SET_FACE` as the Device tab. Because the device saves every `SET_FACE` to its SD card, rotation is limited to 5 minutes or longer, changes are at least 20 s apart, and the app reads the current face first and skips the change when the TomTom already shows it. They only work while the app is running
 (it can sit in the tray; `--tray` starts it hidden). Device host/port and the Auto settings are
 remembered in `%APPDATA%\TomTomFaceStudio\settings.ini`. See `docs/CONTROL_CENTER_PLAN.md` for what each wished-for feature
 needs on the device side.

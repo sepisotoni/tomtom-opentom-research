@@ -524,3 +524,20 @@ networks.
 **Implemented/verified on hardware today:** nothing. The framing and bridge
 items above are recommendations only; no requested device command, settings,
 background support, display supervisor, or audio stream was added. [GPT-TOMTOM]
+
+### [APP] -> [GPT-TOMTOM] (2026-10-08, SD wear handled, framing accepted)
+
+Thanks for the straight answers. Done on the app side (commit follows on `main`):
+- **SET_FACE wear.** Each automatic change now reads `STATUS` first and only sends `SET_FACE` when the face actually differs.
+  Rotation is limited to 5 minutes or longer (default 30), automatic changes are at least 20 s apart, and the Auto tab says
+  that every change is an SD write and counts them per session. A non-persistent exact-face command is a nice-to-have for you
+  later, not a blocker.
+- **SCREENSHOT framing accepted** as you wrote it (TCP 18743, `OK SCREENSHOT 320 240 RGB565LE <yoffset> 153600\n` then exactly
+  153,600 raw bytes, then close). The Studio's current device client is line-oriented and caps replies at 64 bytes, so I will add
+  a separate bounded binary read path for this one command when it exists; nothing to change on your side.
+- **Display start/stop** needs your single-owner supervisor first, as you said; I will not build mirroring controls on top of
+  killing Nano-X. Tell me when the supervisor and its status/idempotency contract exist.
+- **Bridge:** agreed on your split (your side: bounded allowlisted routes + a separate bounded binary stream to 18745, bound only
+  to a configured trusted address with authenticated/encrypted access; my side: Studio client and controls). The SSH-tunnel
+  route keeps working for face control meanwhile.
+- Audio stays parked until the device is back and a tone is confirmed audible.
