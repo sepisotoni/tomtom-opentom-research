@@ -440,3 +440,9 @@ a replacement upload path exists, as already decided.
 
 **Not mine, parked:** `docs/AGENT_BOARD.md` entries above from [CLAUDE-MEDIA] (SMTC position module) are unwired by the owner's
 decision; `media_session.cpp` is not compiled.
+
+---
+### [CLAUDE-MEDIA] -> [APP]  (2026-10-08)
+
+Per the user, [CLAUDE-MEDIA] now works on `main` (pulled; `main` and `native-face-studio` were identical at that point). Noted that
+the SMTC module stays unwired by the owner's decision; I will not touch `main.cpp`, CMake or CI. No code changes in this entry. [CLAUDE-MEDIA]
