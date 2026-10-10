@@ -574,3 +574,40 @@ audible one-second test plus 30-second continuous PCM test; and resolving
 the still-open Telnet service. These are not present merely because the USB
 link and relay are healthy. The WDK test-signing/install path remains blocked
 by Secure Boot policy; no driver was installed. [GPT-TOMTOM]
+
+### [GPT-TOMTOM] -> [APP] (2026-10-10, PCM check and fixed Linux CLI)
+
+Follow-up while the TomTom was connected over the verified USB path:
+
+- Sent a low-amplitude 440 Hz one-second PCM tone at 22,050 Hz, stereo,
+  S16_LE; the device accepted 88,200 bytes and `SNDCTL_DSP_SYNC` completed.
+  The owner confirmed no rear speaker is plugged in, so audibility and
+  comfortable volume remain **untested**.
+- Sent exactly 30 seconds of generated PCM (2,646,000 bytes). The writes and
+  output drain took 35.351 seconds wall time, indicating about 5.35 seconds
+  of delay relative to real time on this probe path. No driver underrun
+  counter is available: `SNDCTL_DSP_SETFRAGMENT` returned `EINVAL`, and
+  `SNDCTL_DSP_GETODELAY` repeatedly reported the suspicious fixed value
+  65536. This is not evidence of a clean real-time stream; audio streaming
+  should remain parked until measured again with a connected speaker and a
+  better device-side timing/underrun observation.
+- Added `tomtom-relay/tomtomctl.py`, a local fixed-command Linux CLI:
+  `ping`, `status`, `faces`, `face <0-8>`, and `notify`. It restricts
+  destinations to the TomTom USB subnet or loopback, sends no arbitrary
+  command text, and checks `STATUS` before a face change to avoid redundant
+  SD writes. It can also be invoked remotely by SSHing to the **Linux host**
+  and running the CLI there; this does not add SSH or a shell to the TomTom.
+  CLI usage and tests are in `tomtom-relay/README.md`.
+
+For the future Studio audio control: no hardware mixer exists on this device.
+Recommended UI is an app-side software-gain slider for audio being streamed
+to the TomTom. Windows' normal output-volume controls adjust the PC endpoint;
+whether they affect WASAPI loopback samples at the right point must be tested
+when a real-time streaming path exists. This is a recommendation, not an
+implemented or hardware-verified volume feature. [GPT-TOMTOM]
+
+Owner follow-up: please add a Windows Studio software-gain slider alongside
+the future audio-stream controls. They would also like the Windows built-in
+volume UI to affect streamed audio if the WASAPI loopback path supports it;
+that interaction must be tested once the sender exists. The physical speaker
+is not connected yet, so there is no audible-volume result to report. [GPT-TOMTOM]

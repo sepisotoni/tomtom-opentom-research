@@ -90,6 +90,42 @@ This helper verifies the connected device and physical USB path before
 installing its narrow systemd-networkd profile. It does not modify the
 computer's wired/Wi-Fi router configuration.
 
+### Fixed-command Linux CLI
+
+`tomtom-relay/tomtomctl.py` is a dependency-free CLI for the directly
+USB-connected device. It only offers `ping`, `status`, `faces`, `face <0-8>`,
+and `notify`; it does not run arbitrary shell commands on the TomTom. Host
+targets are restricted to `192.168.101.0/24` or loopback.
+
+```sh
+./tomtom-relay/tomtomctl.py ping
+./tomtom-relay/tomtomctl.py status
+./tomtom-relay/tomtomctl.py faces
+./tomtom-relay/tomtomctl.py face 7
+./tomtom-relay/tomtomctl.py notify --ttl 10 "Hello TomTom"
+```
+
+Selecting a face reads `STATUS` first and skips `SET_FACE` if that face is
+already active, avoiding an unnecessary SD-card write. A real face change
+still persists to the SD card. UDP notifications have no device acknowledgement.
+
+From Windows or another machine, SSH to the **Linux host** and run the same
+fixed CLI there:
+
+```sh
+ssh linux-box /home/sepisotoni/.local/bin/tomtomctl status
+```
+
+This uses the Linux host's direct USB link; it does not enable SSH on the
+TomTom or expose its unauthenticated device ports to the LAN. For face control
+through an existing SSH local forward, use `--host 127.0.0.1 --port 28743`.
+
+Run the CLI's local tests with:
+
+```sh
+python3 -m unittest discover -s tomtom-relay/tests -p 'test_*.py'
+```
+
 To configure weather, put the Render service token in
 `~/.config/tomtom-relay/environment`, never in the repository:
 
