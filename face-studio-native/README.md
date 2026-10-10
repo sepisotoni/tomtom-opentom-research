@@ -119,11 +119,37 @@ needs on the device side.
 * **Live - webhook**: other programs POST to `http://127.0.0.1:18750/notify` with a bearer token (JSON `{"text": "...", "ttl": 10}`,
   Discord-style `{"content": "..."}` or a plain-text body). Loopback only unless "Allow private LAN" is ticked; random 128-bit
   token, 1 KiB body cap, rate limited. The token and port are kept in `%APPDATA%\TomTomFaceStudio\settings.ini`.
-* **Live - Spotify**: track changes (read from the Spotify desktop window title - no account, nothing sent anywhere) and
-  optional time-synced lyrics (artist + title looked up over HTTPS at lrclib.net, held in memory only). Lyrics reach the
-  TomTom as short notifications; sync is estimated, with +/-0.25 s nudge and restart buttons.
+* **Live - Spotify**: track changes are read from the Spotify desktop window title (no Spotify API/account). Optional
+  time-synced lyrics look up artist + title over HTTPS at lrclib.net, held in memory only. Track announcements and lyric
+  chunks reach the TomTom as short, replaceable notifications; the device does not ACK UDP, so the UI can confirm only
+  that the local datagram send succeeded. Lyrics sync is estimated, with +/-0.25 s nudge and restart buttons.
 
 See `docs/NATIVE_APP_AGENT_HANDOFF.md` for the device-side contract and open requests.
+
+## TomTom compatibility checked on 2026-10-10
+
+The host's direct USB link currently reaches the TomTom at
+`192.168.101.115`. `PING` and `STATUS` work (`OK FACE 6`, Roboto). A real
+face change from 6 to 7 and back to 6 was exercised through the same fixed
+device protocol; each actual change is an SD-card write. An already-active
+face is skipped by the Auto logic and the Linux `tomtomctl` helper.
+
+| Studio feature | Can it reach the TomTom now? | Boundary |
+| --- | --- | --- |
+| Device PING, status and face change | Yes, when the Windows PC can route to the USB device address; live device checks passed from the attached Linux host. | A TCP SSH local tunnel to the Linux host works for Device/Auto commands when the app uses the forwarded host and port. |
+| Auto schedule, launch face and rotation | Uses the same working TCP status/face commands. | The app must remain running; changes persist to SD, with a 5-minute minimum rotation and redundant changes skipped. |
+| Live test notifications, webhook, Spotify announcements and lyrics | Device receiver and UDP packet format are present; a short UDP test datagram was sent over USB (the protocol has no ACK, so display was not independently confirmed). | Requires a direct UDP route to `192.168.101.115:45872`. The Device-tab SSH tunnel is TCP-only and does **not** carry these features when the PC lacks a direct device route. Spotify detection itself requires the Windows Spotify desktop process. |
+| Display mirror | Not safe/ready for normal use. | TCP 18745 was closed in the latest device check; no start/stop supervisor exists, and manually starting the receiver conflicts with the clock renderer. |
+| Extended display | No. | The driver is not installed; test signing on the owner's Windows PC is blocked by Secure Boot policy. |
+| Pictures screenshot/background transfer | No device transfer path yet. | Opening/exporting images and preparing RGB565 files are local desktop functions only; live screenshot fetch and background upload/reload are not implemented. |
+| Face designer, simulator, package/gallery tools | Yes as desktop/offline functions. | They do not by themselves install a face package onto the TomTom. |
+
+When the TomTom is plugged into the Linux host rather than Windows, the
+Windows app does not yet have a bridge for UDP notifications or TCP display
+frames. For now, face control can use the TCP SSH tunnel; the host-side
+`tomtomctl` command can issue fixed notifications locally. The Windows GUI
+itself has not been launched on physical Windows in this environment, so this
+documents protocol/device compatibility, not an end-to-end Windows UI test.
 
 ## Tests
 
@@ -164,10 +190,11 @@ Measured on the GitHub Actions `windows-latest` runner (MSVC, Release, `/MT`, `/
   gallery preview PNGs are valid 160×120 PNGs but **not byte-identical** to the Python ones (all other gallery files are).
 * Integers outside 64 bits keep their exact digits for validation messages but are otherwise treated as out of range.
 * Verified under Wine 9 and in unit tests; a run on physical Windows is still owed (the CI artifact is the vehicle).
-* The app does **not** mirror PC pixels, send notification events, or create a Windows
-  virtual/extended monitor. Its Device tab only uses the narrow face-selection
-  protocol. The proposed display scope is tracked separately in
-  [`../FEATURES_FOR_REVIEW.md`](../FEATURES_FOR_REVIEW.md).
+* Device status/face selection and Live notifications are implemented, but
+  the TomTom must be directly routable from Windows for UDP notifications.
+  Mirroring still lacks safe device-side start/stop ownership; extended display
+  requires a separately installed, trusted driver. See the compatibility
+  matrix above rather than treating those display paths as ready.
 
 ## CPU model: unresolved
 

@@ -611,3 +611,38 @@ the future audio-stream controls. They would also like the Windows built-in
 volume UI to affect streamed audio if the WASAPI loopback path supports it;
 that interaction must be tested once the sender exists. The physical speaker
 is not connected yet, so there is no audible-volume result to report. [GPT-TOMTOM]
+
+### [GPT-TOMTOM] -> [APP] (2026-10-10, Studio device-path verification)
+
+Verified actual device-side operations over the active direct USB link: the
+TomTom answered `PING` and `STATUS` (`OK FACE 6`, Roboto). Using the same
+fixed protocol contract as the Studio, I selected face 7 (one persistent SD
+write) and restored face 6 (one persistent SD write); both were acknowledged
+and confirmed by subsequent `STATUS`. I also sent a 15-second
+`OT1|N|15|Now playing test` UDP test packet. The protocol has no ACK and no
+live screenshot command, so packet delivery was accepted by the local UDP
+send but the display appearance could not be independently captured here.
+
+Availability boundaries for the current Windows executable:
+
+- Device and Auto face changes use TCP 18743 and are device-compatible. The
+  app's documented SSH local tunnel can carry those TCP requests to the Linux
+  USB host. The native Windows GUI has not been launched on Windows in this
+  environment; CLI/protocol checks are not an end-to-end GUI test.
+- Live test notifications, webhook-to-notification, Spotify announcements,
+  and lyrics all use UDP 45872. They work only when the Windows PC itself has
+  a route to the TomTom's USB address. The Device-tab SSH tunnel is TCP-only,
+  so those Live features do not work through that tunnel; no Linux-to-Windows
+  UDP/HTTP bridge has been added. Spotify detection also depends on the
+  Spotify desktop process running on Windows. Lyrics are replaceable
+  notification chunks, not a dedicated media player.
+- Display mirror is unsafe/not ready: TCP 18745 is closed and no supervisor
+  exists to arbitrate framebuffer ownership with Nano-X. The extended monitor
+  still needs a trusted/installable driver; Secure Boot blocked test-signing.
+- Pictures import/export/prepare are desktop-only; there is no on-device
+  screenshot fetch or background upload/reload path.
+
+I updated `face-studio-native/README.md` to replace the stale claim that
+Live/mirror features do not exist with the checked device compatibility and
+network-path limits. The phrase “Now playing test” above is only a synthetic
+notification packet, not a real Spotify track. [GPT-TOMTOM]
